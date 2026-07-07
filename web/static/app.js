@@ -56,6 +56,15 @@ document.body.addEventListener('htmx:afterSwap', function (evt) {
   }
 });
 
+// Out-of-band swaps (e.g. /save refreshing #tree alongside #content) fire
+// htmx:oobAfterSwap instead of htmx:afterSwap, so Sortable needs its own hook.
+document.body.addEventListener('htmx:oobAfterSwap', function (evt) {
+  var id = evt.detail && evt.detail.target && evt.detail.target.id;
+  if (id === 'tree') {
+    initTree();
+  }
+});
+
 document.body.addEventListener('click', function (evt) {
   var link = evt.target.closest('a.title');
   if (!link) {

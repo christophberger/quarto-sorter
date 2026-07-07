@@ -55,7 +55,7 @@
 {{define "pages"}}<ul class="children" data-parent="{{.Parent}}">
 {{range .Pages}}{{template "node" .}}{{end}}</ul>{{end}}
 
-{{define "node"}}<li class="page {{if .Order}}ordered{{else}}unordered{{end}}" data-path="{{.Path}}">
+{{define "node"}}<li class="page {{if .Order}}ordered{{else}}unordered{{end}}{{if .BadFences}} bad-fences{{end}}" data-path="{{.Path}}">
   <div class="row">
     {{if .Path}}<span class="drag-handle" title="Drag to move">⠿</span>{{end}}
     <span class="num"></span>
@@ -70,4 +70,8 @@
 {{define "treewrap"}}{{if .Error}}<div class="error">{{.Error}}</div>{{end}}{{template "tree" .Tree}}{{end}}
 
 {{define "content"}}<h2 class="content-title">{{.Title}} <span class="path">{{.Path}}</span></h2>
-<pre class="file-content">{{.Body}}</pre>{{end}}
+<form class="edit-form" hx-post="/save" hx-target="#content" hx-swap="innerHTML">
+  <input type="hidden" name="path" value="{{.Path}}">
+  <textarea name="body" class="file-content">{{.Body}}</textarea>
+  <button type="submit">Save</button>
+</form>{{end}}
