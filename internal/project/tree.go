@@ -14,11 +14,12 @@ import (
 // that holds (or would hold) the page's children; it is empty when the
 // page cannot have children (the root index.qmd).
 type Page struct {
-	Path     string // slash-separated path relative to the project root
-	Dir      string
-	Title    string
-	Order    *int
-	Children []*Page
+	Path      string // slash-separated path relative to the project root
+	Dir       string
+	Title     string
+	Order     *int
+	BadFences bool // the file has unmatched Quarto block fences
+	Children  []*Page
 }
 
 // Tree is the page tree of a Quarto project.
@@ -73,7 +74,7 @@ func Load(root string) (*Tree, error) {
 			return nil, err
 		}
 		fm := ParseFrontmatter(src)
-		p := &Page{Path: f, Title: fm.Title, Order: fm.Order}
+		p := &Page{Path: f, Title: fm.Title, Order: fm.Order, BadFences: !BalancedFences(src)}
 		if p.Title == "" {
 			p.Title = fallbackTitle(f)
 		}

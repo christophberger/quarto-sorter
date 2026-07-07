@@ -58,6 +58,7 @@ func newServer() (*server, error) {
 	s.mux.HandleFunc("POST /create", s.create)
 	s.mux.HandleFunc("POST /delete", s.delete)
 	s.mux.HandleFunc("GET /content", s.content)
+	s.mux.HandleFunc("POST /save", s.save)
 	return s, nil
 }
 
@@ -245,19 +246,28 @@ func (s *server) delete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// resolvePath validates rel as a page path relative to the open project and
+// returns its absolute location on disk. The caller must hold s.mu.
+func (s *server) resolvePath(rel string) (string, error) {
+	if s.root == "" {
+		return "", fmt.Errorf("no project open")
+	}
+	if clean := path.Clean(rel); clean != rel || path.IsAbs(rel) || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("invalid path")
+	}
+	return filepath.Join(s.root, filepath.FromSlash(rel)), nil
+}
+
 func (s *server) content(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rel := r.URL.Query().Get("path")
-	if s.root == "" {
-		http.Error(w, "no project open", http.StatusBadRequest)
+	abs, err := s.resolvePath(rel)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if clean := path.Clean(rel); clean != rel || path.IsAbs(rel) || strings.HasPrefix(rel, "..") {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-	body, err := os.ReadFile(filepath.Join(s.root, filepath.FromSlash(rel)))
+	body, err := os.ReadFile(abs)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -266,4 +276,37 @@ func (s *server) content(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "content", struct {
 		Title, Path, Body string
 	}{title, rel, string(body)})
+}
+
+// save writes the edited body back to an existing page and re-renders the
+// content pane, plus the tree out of band in case the title changed.
+func (s *server) save(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rel := r.FormValue("path")
+	abs, err := s.resolvePath(rel)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := os.Stat(abs); err != nil {
+		http.Error(w, "no such page", http.StatusBadRequest)
+		return
+	}
+	body := []byte(r.FormValue("body"))
+	if err := os.WriteFile(abs, body, 0o644); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	title := project.ParseFrontmatter(body).Title
+	s.render(w, "content", struct {
+		Title, Path, Body string
+	}{title, rel, string(body)})
+
+	// Refresh the tree out of band: the title shown there may have changed.
+	if st, err := s.load(); err == nil && st.Tree != nil {
+		fmt.Fprint(w, `<div hx-swap-oob="innerHTML:#tree">`)
+		s.render(w, "treewrap", st)
+		fmt.Fprint(w, `</div>`)
+	}
 }

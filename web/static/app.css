@@ -10,6 +10,7 @@
   --accent: #2563eb;
   --accent-bg: #dbeafe;
   --warn: #d97706;
+  --fence-warn: #c2703a;
   --danger: #dc2626;
   --input-bg: #ffffff;
 }
@@ -24,6 +25,7 @@
     --accent: #60a5fa;
     --accent-bg: #1e3a5f;
     --warn: #f59e0b;
+    --fence-warn: #cf8a5b;
     --danger: #f87171;
     --input-bg: #1b1e24;
   }
@@ -219,6 +221,12 @@ li.page.unordered > .row > .title {
   color: var(--muted);
 }
 
+/* Unmatched Quarto block fences: muted orange title. Placed after the
+   unordered rule so it wins for pages that are both. */
+li.page.bad-fences > .row > .title {
+  color: var(--fence-warn);
+}
+
 .title {
   color: var(--fg);
   text-decoration: none;
@@ -288,4 +296,33 @@ pre.file-content {
 p.empty {
   color: var(--muted);
   font-style: italic;
+}
+
+/* Content editor */
+
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+}
+
+textarea.file-content {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin: 0;
+  color: var(--fg);
+  resize: vertical;
+  min-height: 12rem;
+}
+
+.edit-form button {
+  align-self: flex-start;
 }

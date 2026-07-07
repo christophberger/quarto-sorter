@@ -27,6 +27,7 @@ func fixture(t *testing.T) string {
 		"chapter2/second.qmd": "---\ntitle: Second\norder: 1\n---\n# Second\n",
 		"chapter2/third.qmd":  "---\ntitle: Third\norder: 2\n---\n# Third\n",
 		"chapter2/loose.qmd":  "---\ntitle: Loose\n---\n# Loose\n",
+		"chapter2/broken.qmd": "---\ntitle: Broken\norder: 3\n---\n::: {.callout-note}\nunclosed\n",
 		"_quarto.yml":         "project:\n  type: book\nbook:\n  chapters:\n    - index.qmd\n",
 		"_quarto-print.yml":   "book:\n  chapters:\n    - index.qmd\n",
 	}
@@ -86,6 +87,12 @@ func TestOpenRendersTree(t *testing.T) {
 	if !strings.Contains(body, `unordered" data-path="chapter2/loose.qmd"`) {
 		t.Errorf("loose.qmd not marked unordered:\n%s", body)
 	}
+	if !strings.Contains(body, `bad-fences" data-path="chapter2/broken.qmd"`) {
+		t.Errorf("broken.qmd not marked bad-fences:\n%s", body)
+	}
+	if strings.Contains(body, `bad-fences" data-path="chapter2/second.qmd"`) {
+		t.Errorf("second.qmd wrongly marked bad-fences:\n%s", body)
+	}
 }
 
 func TestMoveUpdatesFilesAndYaml(t *testing.T) {
@@ -135,6 +142,33 @@ func TestContent(t *testing.T) {
 	}
 	if rec := get(t, srv, "/content?path=../outside.qmd"); rec.Code != http.StatusBadRequest {
 		t.Errorf("traversal: status %d, want 400", rec.Code)
+	}
+}
+
+func TestSave(t *testing.T) {
+	srv, root := testServer(t)
+	newBody := "---\ntitle: Second\norder: 1\n---\n# Second updated\n"
+	rec := post(t, srv, "/save", url.Values{"path": {"chapter2/second.qmd"}, "body": {newBody}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save: status %d: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "# Second updated") {
+		t.Errorf("response missing updated body:\n%s", rec.Body)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "chapter2/second.qmd"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != newBody {
+		t.Errorf("file on disk not updated: %s", got)
+	}
+
+	if rec := post(t, srv, "/save", url.Values{"path": {"../outside.qmd"}, "body": {"x"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("traversal: status %d, want 400", rec.Code)
+	}
+
+	if rec := post(t, srv, "/save", url.Values{"path": {"nope.qmd"}, "body": {"x"}}); rec.Code != http.StatusBadRequest && rec.Code != http.StatusNotFound {
+		t.Errorf("nonexistent file: status %d, want 400 or 404", rec.Code)
 	}
 }
 
