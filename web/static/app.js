@@ -45,6 +45,16 @@ function initTree() {
   });
 }
 
+// currentPath is the page open in the editor; applySelection re-highlights
+// it after every tree re-render (moves, saves, reloads).
+var currentPath = null;
+
+function applySelection() {
+  document.querySelectorAll('#tree li.page').forEach(function (li) {
+    li.classList.toggle('selected', !!currentPath && li.dataset.path === currentPath);
+  });
+}
+
 document.addEventListener('DOMContentLoaded', function () {
   initTree();
 });
@@ -53,6 +63,12 @@ document.body.addEventListener('htmx:afterSwap', function (evt) {
   var id = evt.detail && evt.detail.target && evt.detail.target.id;
   if (id === 'tree' || id === 'main') { // /open swaps #main, everything else #tree
     initTree();
+    applySelection();
+  }
+  if (id === 'content') { // track whatever the editor now shows
+    var input = evt.detail.target.querySelector('input[name="path"]');
+    currentPath = input ? input.value : null;
+    applySelection();
   }
 });
 
@@ -62,6 +78,7 @@ document.body.addEventListener('htmx:oobAfterSwap', function (evt) {
   var id = evt.detail && evt.detail.target && evt.detail.target.id;
   if (id === 'tree') {
     initTree();
+    applySelection();
   }
 });
 
@@ -70,13 +87,30 @@ document.body.addEventListener('click', function (evt) {
   if (!link) {
     return;
   }
-
-  document.querySelectorAll('li.page.selected').forEach(function (li) {
-    li.classList.remove('selected');
-  });
-
   var item = link.closest('li');
-  if (item) {
-    item.classList.add('selected');
+  currentPath = item ? item.dataset.path : null;
+  applySelection();
+});
+
+// Autosave feedback: the edit form posts /save with hx-swap="none", so the
+// only visible trace is the status text next to the heading.
+function setSaveStatus(text) {
+  var el = document.getElementById('save-status');
+  if (el) {
+    el.textContent = text;
+  }
+}
+
+document.body.addEventListener('htmx:beforeRequest', function (evt) {
+  var elt = evt.detail && evt.detail.elt;
+  if (elt && elt.classList && elt.classList.contains('edit-form')) {
+    setSaveStatus('Saving…');
+  }
+});
+
+document.body.addEventListener('htmx:afterRequest', function (evt) {
+  var elt = evt.detail && evt.detail.elt;
+  if (elt && elt.classList && elt.classList.contains('edit-form')) {
+    setSaveStatus(evt.detail.successful ? 'Saved' : 'Save failed');
   }
 });
