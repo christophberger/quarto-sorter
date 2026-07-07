@@ -144,6 +144,15 @@ button:hover {
   flex: 1;
   overflow-y: auto;
   padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+#content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .new-file-form {
@@ -304,7 +313,8 @@ p.empty {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 textarea.file-content {
