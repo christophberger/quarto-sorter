@@ -1,0 +1,73 @@
+{{define "page"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quarto Sorter</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/sortable.min.js"></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>Quarto Sorter</h1>
+    <form class="open-form" hx-post="/open" hx-target="#main" hx-swap="innerHTML">
+      <input name="path" placeholder="/path/to/quarto/project" value="{{.Root}}">
+      <button type="submit">Open</button>
+    </form>
+    <form id="profiles-form" hx-post="/profiles" hx-trigger="change" hx-swap="none">
+      {{template "profiles" .}}
+    </form>
+  </header>
+  <main class="panes" id="main">
+    {{template "main" .}}
+  </main>
+</body>
+</html>{{end}}
+
+{{define "profiles"}}<fieldset class="profiles" id="profiles">
+  <legend>Profiles</legend>
+  {{range .Profiles}}
+  <label><input type="checkbox" name="profile" value="{{.}}"{{if index $.Selected .}} checked{{end}}> {{.}}</label>
+  {{else}}<span class="empty">none</span>{{end}}
+</fieldset>{{end}}
+
+{{define "main"}}{{if .Tree}}
+<section id="tree-pane">
+  <form class="new-file-form" hx-post="/create" hx-target="#tree" hx-swap="innerHTML">
+    <input type="hidden" name="parent" value="">
+    <input name="name" placeholder="new-page" required>
+    <input name="title" placeholder="Title">
+    <button type="submit">＋ Page</button>
+  </form>
+  <div id="tree">{{template "tree" .Tree}}</div>
+</section>
+<section id="content-pane"><div id="content"><p class="empty">Select a page to view its content.</p></div></section>
+{{else}}
+<section id="tree-pane"><p class="empty">Open a Quarto project to get started.</p></section>
+<section id="content-pane"><div id="content"></div></section>
+{{end}}{{end}}
+
+{{define "tree"}}{{template "pages" group "" .Pages}}{{end}}
+
+{{define "pages"}}<ul class="children" data-parent="{{.Parent}}">
+{{range .Pages}}{{template "node" .}}{{end}}</ul>{{end}}
+
+{{define "node"}}<li class="page {{if .Order}}ordered{{else}}unordered{{end}}" data-path="{{.Path}}">
+  <div class="row">
+    {{if .Path}}<span class="drag-handle" title="Drag to move">⠿</span>{{end}}
+    <span class="num"></span>
+    {{if .Path}}<a class="title" href="#" hx-get="/content?path={{.Path}}" hx-target="#content">{{.Title}}</a>
+    <button class="add" title="Add child page" hx-post="/create" hx-prompt="Name of the new page (without .qmd)" hx-vals='{"parent":"{{.Path}}"}' hx-target="#tree" hx-swap="innerHTML">＋</button>
+    <button class="delete" title="Move to trash" hx-post="/delete" hx-vals='{"path":"{{.Path}}"}' hx-target="#tree" hx-swap="innerHTML" hx-confirm="Move {{.Path}} to the trash?">🗑</button>
+    {{else}}<span class="title">{{.Title}}</span>{{end}}
+  </div>
+  {{template "pages" group .Path .Children}}
+</li>{{end}}
+
+{{define "treewrap"}}{{if .Error}}<div class="error">{{.Error}}</div>{{end}}{{template "tree" .Tree}}{{end}}
+
+{{define "content"}}<h2 class="content-title">{{.Title}} <span class="path">{{.Path}}</span></h2>
+<pre class="file-content">{{.Body}}</pre>{{end}}
