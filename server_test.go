@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -44,7 +45,7 @@ func fixture(t *testing.T) string {
 func testServer(t *testing.T) (http.Handler, string) {
 	t.Helper()
 	root := fixture(t)
-	srv, err := newServer()
+	srv, err := newServer("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,6 +135,90 @@ func TestProfileSelectionLimitsYamlWrites(t *testing.T) {
 	}
 }
 
+// checkboxChecked reports whether the profile checkbox for name is rendered
+// checked in the page HTML.
+func checkboxChecked(t *testing.T, h http.Handler, name string) bool {
+	t.Helper()
+	body := get(t, h, "/").Body.String()
+	attr := `value="` + name + `"`
+	if !strings.Contains(body, attr) {
+		t.Fatalf("page missing profile checkbox %q:\n%s", name, body)
+	}
+	return strings.Contains(body, attr+" checked")
+}
+
+func TestProfileSelectionPersistsPerProject(t *testing.T) {
+	root := fixture(t)
+	prefs := filepath.Join(t.TempDir(), "profiles.json")
+
+	srv, err := newServer(prefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post(t, srv, "/open", url.Values{"path": {root}})
+	if !checkboxChecked(t, srv, "print") {
+		t.Fatal("profile not selected by default")
+	}
+	// Deselect all profiles; the empty selection must be saved for root.
+	if rec := post(t, srv, "/profiles", url.Values{}); rec.Code != http.StatusNoContent {
+		t.Fatalf("profiles: status %d", rec.Code)
+	}
+
+	// Switching to another project and back restores the saved selection.
+	other := fixture(t)
+	post(t, srv, "/open", url.Values{"path": {other}})
+	if !checkboxChecked(t, srv, "print") {
+		t.Error("fresh project should default to all profiles selected")
+	}
+	post(t, srv, "/open", url.Values{"path": {root}})
+	if checkboxChecked(t, srv, "print") {
+		t.Error("deselection not restored after switching projects")
+	}
+
+	// A new server reading the same prefs file (a restart) restores it too.
+	srv2, err := newServer(prefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post(t, srv2, "/open", url.Values{"path": {root}})
+	if checkboxChecked(t, srv2, "print") {
+		t.Error("deselection not restored after restart")
+	}
+	post(t, srv2, "/profiles", url.Values{"profile": {"print"}})
+	post(t, srv2, "/open", url.Values{"path": {other}})
+	post(t, srv2, "/open", url.Values{"path": {root}})
+	if !checkboxChecked(t, srv2, "print") {
+		t.Error("reselection not restored after switching projects")
+	}
+}
+
+func TestSavedSelectionIgnoresRemovedProfiles(t *testing.T) {
+	root := fixture(t)
+	prefs := filepath.Join(t.TempDir(), "profiles.json")
+	// A saved selection may reference a profile whose config was deleted
+	// since; it must neither show up nor break the restore.
+	b, err := json.Marshal(map[string][]string{root: {"print", "gone"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prefs, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := newServer(prefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post(t, srv, "/open", url.Values{"path": {root}})
+	body := get(t, srv, "/").Body.String()
+	if strings.Contains(body, `value="gone"`) {
+		t.Errorf("nonexistent profile rendered:\n%s", body)
+	}
+	if !checkboxChecked(t, srv, "print") {
+		t.Error("existing profile not restored")
+	}
+}
+
 func TestContent(t *testing.T) {
 	srv, _ := testServer(t)
 	body := get(t, srv, "/content?path=chapter2/second.qmd").Body.String()
@@ -201,7 +286,7 @@ func TestCreateAndDelete(t *testing.T) {
 }
 
 func TestOpenBadPath(t *testing.T) {
-	srv, err := newServer()
+	srv, err := newServer("")
 	if err != nil {
 		t.Fatal(err)
 	}

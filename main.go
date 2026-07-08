@@ -14,7 +14,7 @@ func main() {
 	addr := flag.String("addr", "localhost:8199", "listen address")
 	flag.Parse()
 
-	srv, err := newServer()
+	srv, err := newServer(defaultPrefsFile())
 	if err != nil {
 		log.Fatal(err)
 	}

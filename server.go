@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	iofs "io/fs"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,9 +31,24 @@ type server struct {
 	root     string
 	profiles []string
 	selected map[string]bool
+
+	// prefsFile persists the profile selection per project root across
+	// restarts; empty disables persistence. saved holds its content.
+	prefsFile string
+	saved     map[string][]string
 }
 
-func newServer() (*server, error) {
+// defaultPrefsFile returns the profile selections file in the user's config
+// directory, or "" if no config directory is available.
+func defaultPrefsFile() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "quarto-sorter", "profiles.json")
+}
+
+func newServer(prefsFile string) (*server, error) {
 	funcs := template.FuncMap{
 		"group": func(parent string, pages []*project.Page) any {
 			return struct {
@@ -44,7 +61,16 @@ func newServer() (*server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &server{mux: http.NewServeMux(), tmpl: tmpl, selected: map[string]bool{}}
+	s := &server{
+		mux: http.NewServeMux(), tmpl: tmpl, selected: map[string]bool{},
+		prefsFile: prefsFile, saved: map[string][]string{},
+	}
+	if prefsFile != "" {
+		// A missing or unreadable file just means no saved selections yet.
+		if b, err := os.ReadFile(prefsFile); err == nil {
+			json.Unmarshal(b, &s.saved)
+		}
+	}
 	static, err := iofs.Sub(web, "web/static")
 	if err != nil {
 		return nil, err
@@ -132,7 +158,8 @@ func (s *server) open(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, `</div>`)
 }
 
-// setRoot switches to the project at root with all its profiles selected.
+// setRoot switches to the project at root, restoring the saved profile
+// selection for that project, or selecting all profiles if none was saved.
 // The caller must hold s.mu (or not be serving yet).
 func (s *server) setRoot(root string) error {
 	profiles, err := project.Profiles(root)
@@ -140,6 +167,15 @@ func (s *server) setRoot(root string) error {
 		return err
 	}
 	s.root, s.profiles, s.selected = root, profiles, map[string]bool{}
+	if saved, ok := s.saved[root]; ok {
+		// Restore the saved selection, dropping profiles that no longer exist.
+		for _, p := range saved {
+			if slices.Contains(profiles, p) {
+				s.selected[p] = true
+			}
+		}
+		return nil
+	}
 	for _, p := range profiles {
 		s.selected[p] = true // default: keep all profiles in sync
 	}
@@ -154,7 +190,35 @@ func (s *server) setProfiles(w http.ResponseWriter, r *http.Request) {
 	for _, p := range r.Form["profile"] {
 		s.selected[p] = true
 	}
+	if s.root != "" {
+		sel := []string{} // non-nil: an empty selection is a valid saved state
+		for _, p := range s.profiles {
+			if s.selected[p] {
+				sel = append(sel, p)
+			}
+		}
+		s.saved[s.root] = sel
+		s.savePrefs()
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// savePrefs writes the per-project profile selections to the prefs file.
+// Persistence is best effort: the in-memory state is already updated, so a
+// write failure only loses the selection across restarts. The caller must
+// hold s.mu.
+func (s *server) savePrefs() {
+	if s.prefsFile == "" {
+		return
+	}
+	b, err := json.MarshalIndent(s.saved, "", "  ")
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(s.prefsFile), 0o755); err != nil {
+		return
+	}
+	os.WriteFile(s.prefsFile, b, 0o644)
 }
 
 func (s *server) treeHandler(w http.ResponseWriter, r *http.Request) {

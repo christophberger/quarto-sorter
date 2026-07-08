@@ -131,17 +131,35 @@ button:hover {
 }
 
 #tree-pane {
+  flex: none;
   width: 38%;
   min-width: 220px;
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
   padding: 0.5rem;
 }
 
+/* The divider between the panes: a 1px line with a wider grab area. */
+#divider {
+  flex: none;
+  width: 5px;
+  cursor: col-resize;
+  background: var(--border);
+  background-clip: padding-box;
+  border-left: 2px solid transparent;
+  border-right: 2px solid transparent;
+  touch-action: none;
+}
+
+#divider:hover,
+#divider.dragging {
+  background-color: var(--accent);
+}
+
 #content-pane {
   flex: 1;
+  min-width: 200px;
   overflow-y: auto;
   padding: 0.75rem 1rem;
 }
