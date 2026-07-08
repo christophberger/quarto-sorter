@@ -173,14 +173,27 @@ button:hover {
 
 ul.children {
   list-style: none;
-  margin: 0;
-  padding-left: 1.2rem;
+  /* The indentation lives in margin-left (not padding), so a left gutter
+     below each row belongs to the parent <li> rather than to the child
+     list. That gutter is what makes the "drop as next sibling of the last
+     entry" position (e.g. 1.2 after 1.1) reachable: hovering it targets the
+     last row's own list instead of its (empty) child list, which would only
+     offer 1.1.1, or the grandparent list, which would only offer 2. */
+  margin: 0 0 0 0.9rem;
+  padding-left: 0.3rem;
+  padding-bottom: 0.5rem;
   min-height: 8px;
   border-left: 1px solid var(--border);
   counter-reset: chap;
 }
 
+/* A collapsed branch hides its subtree. */
+li.page.collapsed > ul.children {
+  display: none;
+}
+
 #tree > ul.children {
+  margin-left: 0;
   padding-left: 0;
   border-left: none;
 }
@@ -199,6 +212,36 @@ li.page {
 
 .row:hover {
   background: var(--hover);
+}
+
+.toggle {
+  width: 1rem;
+  min-width: 1rem;
+  text-align: center;
+  color: var(--muted);
+  cursor: default;
+  user-select: none;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+/* Only nodes with children get an interactive triangle; leaf nodes keep an
+   empty toggle as a spacer so their rows stay aligned. */
+li.page.has-children > .row > .toggle {
+  cursor: pointer;
+}
+
+li.page.has-children > .row > .toggle::before {
+  content: "\25BE"; /* ▾ expanded */
+}
+
+li.page.has-children.collapsed > .row > .toggle::before {
+  content: "\25B8"; /* ▸ collapsed */
+}
+
+.marker {
+  user-select: none;
+  line-height: 1;
 }
 
 .drag-handle {
