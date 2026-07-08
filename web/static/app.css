@@ -277,6 +277,24 @@ li.selected > .row {
 
 /* Content pane */
 
+.content-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.content-header .content-title {
+  flex: 1;
+  margin: 0;
+}
+
+.save-status {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .content-title {
   margin: 0 0 0.5rem 0;
   font-size: 1rem;
@@ -333,6 +351,3 @@ textarea.file-content {
   min-height: 12rem;
 }
 
-.edit-form button {
-  align-self: flex-start;
-}
