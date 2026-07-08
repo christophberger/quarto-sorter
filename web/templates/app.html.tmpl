@@ -74,9 +74,14 @@
 
 {{define "treewrap"}}{{if .Error}}<div class="error">{{.Error}}</div>{{end}}{{template "tree" .Tree}}{{end}}
 
-{{define "content"}}<h2 class="content-title">{{.Title}} <span class="path">{{.Path}}</span></h2>
-<form class="edit-form" hx-post="/save" hx-target="#content" hx-swap="innerHTML">
+{{define "content-heading"}}{{.Title}} <span class="path">{{.Path}}</span>{{end}}
+
+{{define "content"}}<div class="content-header">
+  <h2 class="content-title" id="content-title">{{template "content-heading" .}}</h2>
+  <span class="save-status" id="save-status"></span>
+  <button class="reload" title="Reload from disk" hx-get="/content?path={{.Path}}&reload=1" hx-target="#content" hx-swap="innerHTML">↻ Reload</button>
+</div>
+<form class="edit-form" hx-post="/save" hx-trigger="input delay:1s from:find textarea" hx-swap="none">
   <input type="hidden" name="path" value="{{.Path}}">
   <textarea name="body" class="file-content">{{.Body}}</textarea>
-  <button type="submit">Save</button>
 </form>{{end}}

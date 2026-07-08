@@ -340,10 +340,16 @@ func (s *server) content(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "content", struct {
 		Title, Path, Body string
 	}{title, rel, string(body)})
+	// The reload button also refreshes the tree: outside edits may have
+	// changed titles or the chapter order.
+	if r.URL.Query().Get("reload") != "" {
+		s.renderTreeOOB(w)
+	}
 }
 
-// save writes the edited body back to an existing page and re-renders the
-// content pane, plus the tree out of band in case the title changed.
+// save writes the edited body back to an existing page. The editor pane is
+// left untouched so autosave never steals the cursor; only the heading is
+// updated out of band, plus the tree if the title changed.
 func (s *server) save(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -353,7 +359,8 @@ func (s *server) save(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if _, err := os.Stat(abs); err != nil {
+	old, err := os.ReadFile(abs)
+	if err != nil {
 		http.Error(w, "no such page", http.StatusBadRequest)
 		return
 	}
@@ -363,11 +370,17 @@ func (s *server) save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	title := project.ParseFrontmatter(body).Title
-	s.render(w, "content", struct {
-		Title, Path, Body string
-	}{title, rel, string(body)})
+	fmt.Fprint(w, `<h2 class="content-title" id="content-title" hx-swap-oob="true">`)
+	s.render(w, "content-heading", struct{ Title, Path string }{title, rel})
+	fmt.Fprint(w, `</h2>`)
+	if title != project.ParseFrontmatter(old).Title {
+		s.renderTreeOOB(w)
+	}
+}
 
-	// Refresh the tree out of band: the title shown there may have changed.
+// renderTreeOOB appends an out-of-band refresh of the tree pane to the
+// response. The caller must hold s.mu.
+func (s *server) renderTreeOOB(w http.ResponseWriter) {
 	if st, err := s.load(); err == nil && st.Tree != nil {
 		fmt.Fprint(w, `<div hx-swap-oob="innerHTML:#tree">`)
 		s.render(w, "treewrap", st)

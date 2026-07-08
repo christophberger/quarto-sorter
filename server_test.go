@@ -228,6 +228,14 @@ func TestContent(t *testing.T) {
 	if rec := get(t, srv, "/content?path=../outside.qmd"); rec.Code != http.StatusBadRequest {
 		t.Errorf("traversal: status %d, want 400", rec.Code)
 	}
+	// A plain content fetch must not refresh the tree, a reload must.
+	if strings.Contains(body, `hx-swap-oob="innerHTML:#tree"`) {
+		t.Errorf("content without reload refreshes tree:\n%s", body)
+	}
+	reload := get(t, srv, "/content?path=chapter2/second.qmd&reload=1").Body.String()
+	if !strings.Contains(reload, `hx-swap-oob="innerHTML:#tree"`) {
+		t.Errorf("reload missing tree refresh:\n%s", reload)
+	}
 }
 
 func TestSave(t *testing.T) {
@@ -237,8 +245,13 @@ func TestSave(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("save: status %d: %s", rec.Code, rec.Body)
 	}
-	if !strings.Contains(rec.Body.String(), "# Second updated") {
-		t.Errorf("response missing updated body:\n%s", rec.Body)
+	// Save leaves the editor alone and updates the heading out of band;
+	// the title is unchanged here, so the tree must not be refreshed.
+	if !strings.Contains(rec.Body.String(), `id="content-title" hx-swap-oob="true"`) {
+		t.Errorf("response missing heading update:\n%s", rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), `hx-swap-oob="innerHTML:#tree"`) {
+		t.Errorf("tree refreshed although title unchanged:\n%s", rec.Body)
 	}
 	got, err := os.ReadFile(filepath.Join(root, "chapter2/second.qmd"))
 	if err != nil {
@@ -246,6 +259,19 @@ func TestSave(t *testing.T) {
 	}
 	if string(got) != newBody {
 		t.Errorf("file on disk not updated: %s", got)
+	}
+
+	// Changing the title must refresh the tree out of band.
+	renamed := "---\ntitle: Second renamed\norder: 1\n---\n# Second updated\n"
+	rec = post(t, srv, "/save", url.Values{"path": {"chapter2/second.qmd"}, "body": {renamed}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save rename: status %d: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `hx-swap-oob="innerHTML:#tree"`) {
+		t.Errorf("tree not refreshed after title change:\n%s", rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "Second renamed") {
+		t.Errorf("response missing new title:\n%s", rec.Body)
 	}
 
 	if rec := post(t, srv, "/save", url.Values{"path": {"../outside.qmd"}, "body": {"x"}}); rec.Code != http.StatusBadRequest {
