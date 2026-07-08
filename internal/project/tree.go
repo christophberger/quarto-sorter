@@ -18,9 +18,16 @@ type Page struct {
 	Dir       string
 	Title     string
 	Order     *int
-	BadFences bool // the file has unmatched Quarto block fences
+	BadFences bool   // the file has unmatched Quarto block fences
+	Marker    string // emoji marker from a _FW/_POL suffix (own or inherited)
 	Children  []*Page
 }
+
+// Emoji markers for the _FW and _POL name suffixes.
+const (
+	markerFW  = "\U0001F692" // 🚒
+	markerPOL = "\U0001F693" // 🚔
+)
 
 // Tree is the page tree of a Quarto project.
 type Tree struct {
@@ -76,7 +83,11 @@ func Load(root string) (*Tree, error) {
 		fm := ParseFrontmatter(src)
 		p := &Page{Path: f, Title: fm.Title, Order: fm.Order, BadFences: !BalancedFences(src)}
 		if p.Title == "" {
-			p.Title = fallbackTitle(f)
+			if h := FirstHeading(src); h != "" {
+				p.Title = h
+			} else {
+				p.Title = fallbackTitle(f)
+			}
 		}
 		pages[f] = p
 	}
@@ -132,7 +143,41 @@ func Load(root string) (*Tree, error) {
 	}
 	t := &Tree{Root: root, Pages: groups["."]}
 	sortPages(t.Pages)
+	markPages(t.Pages, "")
 	return t, nil
+}
+
+// ownMarker returns the emoji marker implied by a page's own name suffix, or
+// "" if the name has neither the _FW nor the _POL suffix. Section and
+// directory nodes match on their directory name; plain files on the base
+// name before the .qmd extension.
+func ownMarker(p *Page) string {
+	var name string
+	if p.Path == "" || path.Base(p.Path) == "index.qmd" {
+		name = path.Base(p.Dir)
+	} else {
+		name = strings.TrimSuffix(path.Base(p.Path), ".qmd")
+	}
+	switch {
+	case strings.HasSuffix(name, "_FW"):
+		return markerFW
+	case strings.HasSuffix(name, "_POL"):
+		return markerPOL
+	}
+	return ""
+}
+
+// markPages assigns each page its emoji marker. A page's own _FW/_POL suffix
+// wins; otherwise it inherits the marker of its nearest marked ancestor.
+func markPages(pages []*Page, inherited string) {
+	for _, p := range pages {
+		m := ownMarker(p)
+		if m == "" {
+			m = inherited
+		}
+		p.Marker = m
+		markPages(p.Children, m)
+	}
 }
 
 func fallbackTitle(f string) string {

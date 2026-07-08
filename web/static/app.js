@@ -2,6 +2,19 @@
 
 var sortableInstances = [];
 
+// Collapsed branches, keyed by each node's data-key. #tree is fully
+// re-rendered on every move/create/delete/save, so this module-level state
+// is what keeps collapsed branches collapsed across those re-renders.
+var collapsed = new Set();
+
+// applyCollapsed re-applies the persisted collapsed state to the freshly
+// rendered tree.
+function applyCollapsed(tree) {
+  tree.querySelectorAll('li.page.has-children').forEach(function (li) {
+    li.classList.toggle('collapsed', collapsed.has(li.dataset.key));
+  });
+}
+
 function initTree() {
   // Destroy any stale Sortable instances before re-initializing.
   sortableInstances.forEach(function (inst) {
@@ -14,6 +27,8 @@ function initTree() {
     return;
   }
 
+  applyCollapsed(tree);
+
   var lists = tree.querySelectorAll('ul.children');
   lists.forEach(function (list) {
     var inst = Sortable.create(list, {
@@ -22,6 +37,16 @@ function initTree() {
       animation: 150,
       fallbackOnBody: true,
       swapThreshold: 0.65,
+      // Inverted swap makes the outer band of a row insert next to it, so
+      // hovering the lower edge of the last subentry (in the gutter left of
+      // its child list) inserts AFTER it — the "1.2" drop position that a
+      // plain swap zone never offers with nested lists.
+      invertSwap: true,
+      invertedSwapThreshold: 0.65,
+      // Only treat a list as an empty drop target when the pointer is right
+      // inside it, so the empty child list under the last row does not grab
+      // drops meant for the parent list's bottom strip.
+      emptyInsertThreshold: 3,
       ghostClass: 'drag-ghost',
       onEnd: function (evt) {
         var sameList = evt.from === evt.to;
@@ -66,6 +91,21 @@ document.body.addEventListener('htmx:oobAfterSwap', function (evt) {
 });
 
 document.body.addEventListener('click', function (evt) {
+  var toggle = evt.target.closest('.toggle');
+  if (toggle) {
+    var node = toggle.closest('li.page');
+    if (node && node.classList.contains('has-children')) {
+      var key = node.dataset.key;
+      if (collapsed.has(key)) {
+        collapsed.delete(key);
+      } else {
+        collapsed.add(key);
+      }
+      node.classList.toggle('collapsed', collapsed.has(key));
+    }
+    return;
+  }
+
   var link = evt.target.closest('a.title');
   if (!link) {
     return;
