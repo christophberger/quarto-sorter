@@ -70,14 +70,65 @@ function initTree() {
   });
 }
 
+// initDivider makes the vertical divider between the tree pane and the
+// content pane draggable. The chosen width is kept in localStorage so it
+// survives reloads and the #main re-render on /open.
+function initDivider() {
+  var divider = document.getElementById('divider');
+  var pane = document.getElementById('tree-pane');
+  if (!divider || !pane) {
+    return;
+  }
+
+  var saved = localStorage.getItem('treePaneWidth');
+  if (saved) {
+    pane.style.width = saved;
+  }
+
+  divider.addEventListener('pointerdown', function (evt) {
+    evt.preventDefault();
+    divider.setPointerCapture(evt.pointerId);
+    divider.classList.add('dragging');
+
+    function onMove(e) {
+      var panes = pane.parentElement.getBoundingClientRect();
+      // Keep the content pane usable; the tree pane's CSS min-width
+      // provides the lower bound.
+      var width = Math.max(Math.min(e.clientX - panes.left, panes.width - 200), 0);
+      pane.style.width = width + 'px';
+    }
+
+    function onUp() {
+      divider.removeEventListener('pointermove', onMove);
+      divider.removeEventListener('pointerup', onUp);
+      divider.classList.remove('dragging');
+      localStorage.setItem('treePaneWidth', pane.style.width);
+    }
+
+    divider.addEventListener('pointermove', onMove);
+    divider.addEventListener('pointerup', onUp);
+  });
+}
+
 document.addEventListener('DOMContentLoaded', function () {
   initTree();
+  initDivider();
 });
 
 document.body.addEventListener('htmx:afterSwap', function (evt) {
   var id = evt.detail && evt.detail.target && evt.detail.target.id;
   if (id === 'tree' || id === 'main') { // /open swaps #main, everything else #tree
     initTree();
+  }
+});
+
+// /open replaces the divider along with the panes. Re-init only after htmx
+// has settled: settling restores the swapped-in attributes of elements whose
+// id survived the swap, which would wipe a width set during afterSwap.
+document.body.addEventListener('htmx:afterSettle', function (evt) {
+  var id = evt.detail && evt.detail.target && evt.detail.target.id;
+  if (id === 'main') {
+    initDivider();
   }
 });
 
@@ -91,6 +142,21 @@ document.body.addEventListener('htmx:oobAfterSwap', function (evt) {
 });
 
 document.body.addEventListener('click', function (evt) {
+  // "All / none": check every profile box, or uncheck all if all are checked,
+  // then fire the change event htmx listens for so the selection is saved.
+  if (evt.target.closest('#profiles-all')) {
+    var boxes = Array.prototype.slice.call(
+      document.querySelectorAll('#profiles input[name="profile"]')
+    );
+    var allChecked = boxes.every(function (b) { return b.checked; });
+    boxes.forEach(function (b) { b.checked = !allChecked; });
+    var form = document.getElementById('profiles-form');
+    if (form) {
+      form.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    return;
+  }
+
   var toggle = evt.target.closest('.toggle');
   if (toggle) {
     var node = toggle.closest('li.page');

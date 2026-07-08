@@ -32,6 +32,7 @@
   {{range .Profiles}}
   <label><input type="checkbox" name="profile" value="{{.}}"{{if index $.Selected .}} checked{{end}}> {{.}}</label>
   {{else}}<span class="empty">none</span>{{end}}
+  {{if .Profiles}}<button type="button" id="profiles-all" title="Select or deselect all profiles">All / none</button>{{end}}
 </fieldset>{{end}}
 
 {{define "main"}}{{if .Tree}}
@@ -44,9 +45,11 @@
   </form>
   <div id="tree">{{template "tree" .Tree}}</div>
 </section>
+<div id="divider" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
 <section id="content-pane"><div id="content"><p class="empty">Select a page to view its content.</p></div></section>
 {{else}}
 <section id="tree-pane"><p class="empty">Open a Quarto project to get started.</p></section>
+<div id="divider" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
 <section id="content-pane"><div id="content"></div></section>
 {{end}}{{end}}
 
