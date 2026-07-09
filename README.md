@@ -15,6 +15,10 @@ or down the folder hierarchy). Quarto Sorter keeps all three in sync.
 go run github.com/christophberger/quarto-sorter@latest [path/to/project]
 ```
 
+Or download a prebuilt binary for your platform from the
+[Releases page](https://github.com/christophberger/quarto-sorter/releases).
+Check the version of an installed binary with `quarto-sorter --version`.
+
 Then open http://localhost:8199 (change with `-addr`). Enter a project path
 in the top bar, or pass it as an argument.
 
