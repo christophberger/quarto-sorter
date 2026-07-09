@@ -6,13 +6,28 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+)
+
+// Set via -ldflags at build time (see .goreleaser.yaml).
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 func main() {
 	addr := flag.String("addr", "localhost:8199", "listen address")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("quarto-sorter %s (commit %s, built %s)\n", version, commit, date)
+		os.Exit(0)
+	}
 
 	srv, err := newServer(defaultPrefsFile())
 	if err != nil {
