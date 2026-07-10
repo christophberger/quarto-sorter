@@ -43,16 +43,16 @@ func TestMarkers(t *testing.T) {
 	}
 
 	cases := map[string]string{
-		"index.qmd":                "",        // no suffix, no marked ancestor
-		"plain.qmd":                "",        // no suffix
-		"station_FW/index.qmd":     markerFW,  // folder's own suffix
-		"station_FW/alpha.qmd":     markerFW,  // inherited from folder
-		"station_FW/bravo_POL.qmd": markerPOL, // own suffix overrides folder
-		"report_POL.qmd":           markerPOL, // own suffix
-		"ops_POL/index.qmd":        markerPOL, // folder's own suffix
-		"ops_POL/sub/index.qmd":    markerPOL, // inherited one level down
-		"ops_POL/sub/leaf.qmd":     markerPOL, // inherited two levels down
-		"zone_FW/only.qmd":         markerFW,  // inherited from synthetic dir node
+		"index.qmd":                markerWarn, // no suffix, no marked ancestor -> warning
+		"plain.qmd":                markerWarn, // no suffix, no marked ancestor -> warning
+		"station_FW/index.qmd":     markerFW,   // folder's own suffix
+		"station_FW/alpha.qmd":     markerFW,   // inherited from folder
+		"station_FW/bravo_POL.qmd": markerPOL,  // own suffix overrides folder
+		"report_POL.qmd":           markerPOL,  // own suffix
+		"ops_POL/index.qmd":        markerPOL,  // folder's own suffix
+		"ops_POL/sub/index.qmd":    markerPOL,  // inherited one level down
+		"ops_POL/sub/leaf.qmd":     markerPOL,  // inherited two levels down
+		"zone_FW/only.qmd":         markerFW,   // inherited from synthetic dir node
 	}
 	for p, want := range cases {
 		pg := tree.Find(p)

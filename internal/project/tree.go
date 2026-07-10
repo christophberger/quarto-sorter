@@ -19,14 +19,16 @@ type Page struct {
 	Title     string
 	Order     *int
 	BadFences bool   // the file has unmatched Quarto block fences
-	Marker    string // emoji marker from a _FW/_POL suffix (own or inherited)
+	Marker    string // emoji marker from a _FW/_POL suffix (own or inherited), or markerWarn if unmarked
 	Children  []*Page
 }
 
-// Emoji markers for the _FW and _POL name suffixes.
+// Emoji markers for the _FW and _POL name suffixes, plus the warning
+// fallback shown when a page has neither its own nor an inherited marker.
 const (
-	markerFW  = "\U0001F692" // 🚒
-	markerPOL = "\U0001F693" // 🚔
+	markerFW   = "\U0001F692" // 🚒
+	markerPOL  = "\U0001F693" // 🚔
+	markerWarn = "⚠️"         // ⚠️ page has neither a _FW nor a _POL marker
 )
 
 // Tree is the page tree of a Quarto project.
@@ -168,15 +170,20 @@ func ownMarker(p *Page) string {
 }
 
 // markPages assigns each page its emoji marker. A page's own _FW/_POL suffix
-// wins; otherwise it inherits the marker of its nearest marked ancestor.
+// wins; otherwise it inherits the marker of its nearest marked ancestor. A
+// page with no own or inherited marker displays markerWarn, but that warning
+// is never itself inherited by children.
 func markPages(pages []*Page, inherited string) {
 	for _, p := range pages {
 		m := ownMarker(p)
 		if m == "" {
 			m = inherited
 		}
-		p.Marker = m
 		markPages(p.Children, m)
+		if m == "" {
+			m = markerWarn
+		}
+		p.Marker = m
 	}
 }
 
