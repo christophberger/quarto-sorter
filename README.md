@@ -23,8 +23,8 @@ Then open http://localhost:8199 (change with `-addr`). Enter a project path
 in the top bar, or pass it as an argument.
 
 - The left pane shows the page tree, sorted by the `order` frontmatter.
-  Pages without an `order` field are flagged with ⚠ and listed below their
-  ordered siblings.
+  Pages without an `order` field show no chapter number, appear with muted
+  titles, and are listed below their ordered siblings.
 - Drag a page by its ⠿ handle to reorder it — or drop it onto another
   chapter to move it there (files are moved on disk accordingly).
 - Click a page title to view the file in the right pane.
