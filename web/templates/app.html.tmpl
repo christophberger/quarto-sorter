@@ -39,11 +39,12 @@
 <section id="tree-pane">
   <form class="new-file-form" hx-post="/create" hx-target="#tree" hx-swap="innerHTML">
     <input type="hidden" name="parent" value="">
+    <input type="hidden" name="after" value="">
     <input name="name" placeholder="new-page" required>
     <input name="title" placeholder="Title">
     <button type="submit">＋ Page</button>
   </form>
-  <div id="tree">{{template "tree" .Tree}}</div>
+  <div id="tree" hx-get="/watch" hx-trigger="every 2s" hx-swap="innerHTML">{{template "tree" .Tree}}</div>
 </section>
 <div id="divider" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
 <section id="content-pane"><div id="content"><p class="empty">Select a page to view its content.</p></div></section>

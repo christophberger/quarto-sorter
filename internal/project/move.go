@@ -129,21 +129,13 @@ func shiftHeadingsBelow(abs string, delta int) error {
 	})
 }
 
-// CreatePage creates a new page named name under parent ("" for root) with
-// the given title, ordered after the last ordered sibling. It returns the
-// new page's path.
+// CreatePage creates a new page as name/index.qmd under parent ("" for
+// root) with the given title, ordered after the last ordered sibling. It
+// returns the new page's path.
 func (t *Tree) CreatePage(parent, name, title string) (string, error) {
-	name = strings.TrimSuffix(strings.ReplaceAll(strings.TrimSpace(name), " ", "-"), ".qmd")
-	if name == "" || strings.ContainsAny(name, `/\`) {
-		return "", fmt.Errorf("invalid page name %q", name)
-	}
 	destDir, siblings, _, err := t.resolveParent(parent)
 	if err != nil {
 		return "", err
-	}
-	rel := join(destDir, name+".qmd")
-	if _, err := os.Stat(t.abs(rel)); err == nil {
-		return "", fmt.Errorf("%s already exists", rel)
 	}
 	order := 0
 	for _, p := range siblings {
@@ -151,7 +143,54 @@ func (t *Tree) CreatePage(parent, name, title string) (string, error) {
 			order = *p.Order
 		}
 	}
-	content := fmt.Sprintf("---\ntitle: %s\norder: %d\n---\n\n", strconv.Quote(title), order+1)
+	return t.newPageFile(destDir, name, title, order+1)
+}
+
+// CreatePageAfter creates a new page as name/index.qmd in the sibling
+// group of the page at after, immediately following it. Like Move, it
+// renumbers the whole group sequentially, so previously unordered
+// siblings become ordered. It returns the new page's path.
+func (t *Tree) CreatePageAfter(after, name, title string) (string, error) {
+	ap := t.Find(after)
+	if ap == nil {
+		return "", fmt.Errorf("page %s not found", after)
+	}
+	dir := groupDir(after)
+	rel, err := t.newPageFile(dir, name, title, 0)
+	if err != nil {
+		return "", err
+	}
+	n := 0
+	for _, p := range t.group(dir) {
+		n++
+		if err := t.setOrder(p.Path, n); err != nil {
+			return "", err
+		}
+		if p == ap {
+			n++
+			if err := t.setOrder(rel, n); err != nil {
+				return "", err
+			}
+		}
+	}
+	return rel, nil
+}
+
+// newPageFile writes destDir/name/index.qmd with title and order
+// frontmatter and returns its path.
+func (t *Tree) newPageFile(destDir, name, title string, order int) (string, error) {
+	name = strings.TrimSuffix(strings.ReplaceAll(strings.TrimSpace(name), " ", "-"), ".qmd")
+	if name == "" || strings.ContainsAny(name, `/\`) || strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+		return "", fmt.Errorf("invalid page name %q", name)
+	}
+	dir := join(destDir, name)
+	for _, taken := range []string{dir, dir + ".qmd"} {
+		if _, err := os.Stat(t.abs(taken)); err == nil {
+			return "", fmt.Errorf("%s already exists", taken)
+		}
+	}
+	rel := dir + "/index.qmd"
+	content := fmt.Sprintf("---\ntitle: %s\norder: %d\n---\n\n", strconv.Quote(title), order)
 	if err := os.MkdirAll(filepath.Dir(t.abs(rel)), 0o755); err != nil {
 		return "", err
 	}
