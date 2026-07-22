@@ -81,33 +81,47 @@ func hasBook(src []byte) bool {
 	return ok
 }
 
-// flavorSuffixes are profile name suffixes that select a flavor of a book
-// but do not change the folder the book's chapters live in.
-var flavorSuffixes = []string{"-fw", "-pol"}
+// flavorMarkers maps a profile flavor suffix to the page marker it selects.
+var flavorMarkers = map[string]string{"fw": markerFW, "pol": markerPOL}
 
-// profileDir returns the folder a book profile's chapters live in: the
-// profile name with any flavor suffixes removed (calltaker-pol → calltaker).
-func profileDir(name string) string {
+// profileTarget splits a profile name into the folder that holds the
+// profile's chapters and the set of page markers its flavor suffixes
+// select (calltaker-pol → calltaker, POL). An empty marker set means the
+// profile has no flavor and takes every page of its folder.
+func profileTarget(name string) (dir string, markers map[string]bool) {
+	markers = map[string]bool{}
 	for trimmed := true; trimmed; {
 		trimmed = false
-		for _, suf := range flavorSuffixes {
+		for flavor, marker := range flavorMarkers {
+			suf := "-" + flavor
 			if len(name) > len(suf) && strings.EqualFold(name[len(name)-len(suf):], suf) {
 				name, trimmed = name[:len(name)-len(suf)], true
+				markers[marker] = true
 			}
 		}
 	}
-	return name
+	return name, markers
 }
 
-// folderChapters returns the chapters that belong to dir: the pages inside
-// the folder, plus the folder's section page (dir.qmd) if present.
-func folderChapters(chapters []string, dir string) []string {
+// profileChapters returns the chapter list for the named profile: the
+// pages of the profile's folder (including the folder's section page) in
+// display order, without pages marked for a different flavor. Unmarked
+// pages belong to every flavor.
+func (t *Tree) profileChapters(name string) []string {
+	dir, markers := profileTarget(name)
 	out := []string{}
-	for _, c := range chapters {
-		if c == dir+".qmd" || strings.HasPrefix(c, dir+"/") {
-			out = append(out, c)
+	var walk func([]*Page)
+	walk = func(pages []*Page) {
+		for _, p := range pages {
+			inDir := p.Path == dir+".qmd" || strings.HasPrefix(p.Path, dir+"/")
+			if p.Path != "" && inDir &&
+				(len(markers) == 0 || p.Marker == "" || markers[p.Marker]) {
+				out = append(out, p.Path)
+			}
+			walk(p.Children)
 		}
 	}
+	walk(t.Pages)
 	return out
 }
 
@@ -115,13 +129,12 @@ func folderChapters(chapters []string, dir string) []string {
 // selected profile config (_quarto-<name>.yml) that configures a book, and
 // of _quarto.yml if it already maintains a chapter list. _quarto.yml gets
 // the full list; each profile gets only the chapters of its own folder,
-// named after the profile minus flavor suffixes. Selected profiles without
-// a book key are left untouched.
+// named after the profile minus flavor suffixes, filtered to the profile's
+// flavor. Selected profiles without a book key are left untouched.
 func (t *Tree) WriteChapters(profiles []string) error {
-	chapters := t.Chapters()
 	main := filepath.Join(t.Root, "_quarto.yml")
 	if src, err := os.ReadFile(main); err == nil && hasChapters(src) {
-		if err := updateChaptersFile(main, src, chapters); err != nil {
+		if err := updateChaptersFile(main, src, t.Chapters()); err != nil {
 			return err
 		}
 	}
@@ -134,7 +147,7 @@ func (t *Tree) WriteChapters(profiles []string) error {
 		if !hasBook(src) {
 			continue
 		}
-		if err := updateChaptersFile(file, src, folderChapters(chapters, profileDir(p))); err != nil {
+		if err := updateChaptersFile(file, src, t.profileChapters(p)); err != nil {
 			return err
 		}
 	}

@@ -3,6 +3,7 @@ package project
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -126,17 +127,86 @@ func TestWriteChaptersFlavorProfile(t *testing.T) {
 	}
 }
 
-func TestProfileDir(t *testing.T) {
-	for name, want := range map[string]string{
-		"sysadmin":         "sysadmin",
-		"calltaker-pol":    "calltaker",
-		"calltaker-fw":     "calltaker",
-		"calltaker-pol-fw": "calltaker",
-		"netfw":            "netfw", // no "-" boundary, not a flavor suffix
-	} {
-		if got := profileDir(name); got != want {
-			t.Errorf("profileDir(%q) = %q, want %q", name, got, want)
+func TestProfileTarget(t *testing.T) {
+	tests := []struct {
+		name, dir string
+		markers   map[string]bool
+	}{
+		{"sysadmin", "sysadmin", map[string]bool{}},
+		{"calltaker-pol", "calltaker", map[string]bool{markerPOL: true}},
+		{"calltaker-fw", "calltaker", map[string]bool{markerFW: true}},
+		{"calltaker-pol-fw", "calltaker", map[string]bool{markerFW: true, markerPOL: true}},
+		{"netfw", "netfw", map[string]bool{}}, // no "-" boundary, not a flavor suffix
+	}
+	for _, tt := range tests {
+		dir, markers := profileTarget(tt.name)
+		if dir != tt.dir || !reflect.DeepEqual(markers, tt.markers) {
+			t.Errorf("profileTarget(%q) = %q, %v, want %q, %v",
+				tt.name, dir, markers, tt.dir, tt.markers)
 		}
+	}
+}
+
+// A flavored profile drops pages marked for the other flavor, including
+// whole subtrees that inherit their marker from a _FW/_POL folder.
+// Unmarked pages appear in both flavors.
+func TestWriteChaptersFlavorFiltering(t *testing.T) {
+	root := t.TempDir()
+	pages := map[string]string{
+		"index.qmd":                     "---\ntitle: Home\norder: 1\n---\n# Home\n",
+		"calltaker/index.qmd":           "---\ntitle: Calltaker\norder: 2\n---\n# CT\n",
+		"calltaker/base.qmd":            "---\ntitle: Base\norder: 1\n---\n# Base\n",
+		"calltaker/alarm_FW.qmd":        "---\ntitle: Alarm\norder: 2\n---\n# Alarm\n",
+		"calltaker/arrest_POL.qmd":      "---\ntitle: Arrest\norder: 3\n---\n# Arrest\n",
+		"calltaker/drills_FW/index.qmd": "---\ntitle: Drills\norder: 4\n---\n# Drills\n",
+		"calltaker/drills_FW/one.qmd":   "---\ntitle: One\norder: 1\n---\n# One\n",
+	}
+	for name, content := range pages {
+		p := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"_quarto-calltaker-pol.yml", "_quarto-calltaker-fw.yml"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("book:\n  chapters:\n    - index.qmd\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.WriteChapters([]string{"calltaker-pol", "calltaker-fw"}); err != nil {
+		t.Fatal(err)
+	}
+
+	pol, _ := os.ReadFile(filepath.Join(root, "_quarto-calltaker-pol.yml"))
+	for _, want := range []string{"- calltaker/index.qmd", "- calltaker/base.qmd", "- calltaker/arrest_POL.qmd"} {
+		if !strings.Contains(string(pol), want) {
+			t.Errorf("pol profile missing %q:\n%s", want, pol)
+		}
+	}
+	for _, stray := range []string{"alarm_FW", "drills_FW"} {
+		if strings.Contains(string(pol), stray) {
+			t.Errorf("pol profile contains FW page %q:\n%s", stray, pol)
+		}
+	}
+
+	fw, _ := os.ReadFile(filepath.Join(root, "_quarto-calltaker-fw.yml"))
+	for _, want := range []string{
+		"- calltaker/index.qmd", "- calltaker/base.qmd", "- calltaker/alarm_FW.qmd",
+		"- calltaker/drills_FW/index.qmd", "- calltaker/drills_FW/one.qmd",
+	} {
+		if !strings.Contains(string(fw), want) {
+			t.Errorf("fw profile missing %q:\n%s", want, fw)
+		}
+	}
+	if strings.Contains(string(fw), "arrest_POL") {
+		t.Errorf("fw profile contains POL page:\n%s", fw)
 	}
 }
 
