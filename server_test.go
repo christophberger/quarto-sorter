@@ -295,23 +295,104 @@ func TestCreateAndDelete(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create: status %d: %s", rec.Code, rec.Body)
 	}
-	if !strings.Contains(rec.Body.String(), `data-path="about.qmd"`) {
+	// A new page is created as name/index.qmd.
+	if !strings.Contains(rec.Body.String(), `data-path="about/index.qmd"`) {
 		t.Errorf("tree missing created page:\n%s", rec.Body)
 	}
 	yml, _ := os.ReadFile(filepath.Join(root, "_quarto.yml"))
-	if !strings.Contains(string(yml), "- about.qmd") {
+	if !strings.Contains(string(yml), "- about/index.qmd") {
 		t.Errorf("_quarto.yml missing created page: %s", yml)
 	}
 
-	rec = post(t, srv, "/delete", url.Values{"path": {"about.qmd"}})
+	rec = post(t, srv, "/delete", url.Values{"path": {"about/index.qmd"}})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete: status %d: %s", rec.Code, rec.Body)
 	}
-	if strings.Contains(rec.Body.String(), `data-path="about.qmd"`) {
+	if strings.Contains(rec.Body.String(), `data-path="about/index.qmd"`) {
 		t.Errorf("tree still shows deleted page:\n%s", rec.Body)
 	}
-	if _, err := os.Stat(filepath.Join(root, "about.qmd")); !os.IsNotExist(err) {
-		t.Error("about.qmd still on disk")
+	if _, err := os.Stat(filepath.Join(root, "about")); !os.IsNotExist(err) {
+		t.Error("about/ still on disk")
+	}
+}
+
+// The top-bar create form sends the selected page as "after"; the new page
+// lands right behind it in the same group.
+func TestCreateAfter(t *testing.T) {
+	srv, root := testServer(t)
+	rec := post(t, srv, "/create", url.Values{
+		"parent": {""}, "after": {"chapter2/second.qmd"},
+		"name": {"inserted"}, "title": {"Inserted"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: status %d: %s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-path="chapter2/inserted/index.qmd"`) {
+		t.Errorf("tree missing inserted page:\n%s", body)
+	}
+	// The new page sits after second and before third in the tree.
+	iSecond := strings.Index(body, `data-path="chapter2/second.qmd"`)
+	iNew := strings.Index(body, `data-path="chapter2/inserted/index.qmd"`)
+	iThird := strings.Index(body, `data-path="chapter2/third.qmd"`)
+	if !(iSecond < iNew && iNew < iThird) {
+		t.Errorf("inserted page not between second and third:\n%s", body)
+	}
+	yml, _ := os.ReadFile(filepath.Join(root, "_quarto.yml"))
+	if !strings.Contains(string(yml), "- chapter2/inserted/index.qmd") {
+		t.Errorf("_quarto.yml missing inserted page: %s", yml)
+	}
+}
+
+// /watch returns 204 while the project is unchanged and the refreshed tree
+// once a page appears on disk outside the sorter.
+func TestWatchDetectsExternalChanges(t *testing.T) {
+	srv, root := testServer(t)
+	if rec := get(t, srv, "/watch"); rec.Code != http.StatusNoContent {
+		t.Fatalf("watch unchanged: status %d, want 204", rec.Code)
+	}
+	// Add a page directly on disk.
+	page := "---\ntitle: Outside\norder: 9\n---\n# Outside\n"
+	if err := os.WriteFile(filepath.Join(root, "chapter2", "outside.qmd"), []byte(page), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := get(t, srv, "/watch")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("watch changed: status %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `data-path="chapter2/outside.qmd"`) {
+		t.Errorf("watch missing externally added page:\n%s", rec.Body)
+	}
+	// Once served, the state is up to date again.
+	if rec := get(t, srv, "/watch"); rec.Code != http.StatusNoContent {
+		t.Errorf("watch after refresh: status %d, want 204", rec.Code)
+	}
+}
+
+// Dropping a book profile config on disk makes its checkbox appear via
+// /watch, refreshed out of band alongside the tree.
+func TestWatchRefreshesProfiles(t *testing.T) {
+	srv, root := testServer(t)
+	if strings.Contains(get(t, srv, "/").Body.String(), `value="extra"`) {
+		t.Fatal("extra profile present before it exists")
+	}
+	cfg := "book:\n  chapters:\n    - index.qmd\n"
+	if err := os.WriteFile(filepath.Join(root, "_quarto-extra.yml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := get(t, srv, "/watch")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("watch: status %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `hx-swap-oob="innerHTML:#profiles-form"`) {
+		t.Errorf("watch missing profile OOB refresh:\n%s", rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `value="extra"`) {
+		t.Errorf("watch missing new profile checkbox:\n%s", rec.Body)
+	}
+	// A freshly appearing profile defaults to selected (select-all default).
+	if !checkboxChecked(t, srv, "extra") {
+		t.Error("new profile not selected by default")
 	}
 }
 

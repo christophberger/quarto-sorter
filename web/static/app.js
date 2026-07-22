@@ -138,6 +138,15 @@ document.body.addEventListener('htmx:afterSwap', function (evt) {
   }
 });
 
+// The top-bar "＋ Page" form inserts the new page after the one selected in
+// the tree; carry that selection along as the "after" parameter.
+document.body.addEventListener('htmx:configRequest', function (evt) {
+  var elt = evt.detail && evt.detail.elt;
+  if (elt && elt.classList && elt.classList.contains('new-file-form')) {
+    evt.detail.parameters.after = currentPath || '';
+  }
+});
+
 // /open replaces the divider along with the panes. Re-init only after htmx
 // has settled: settling restores the swapped-in attributes of elements whose
 // id survived the swap, which would wipe a width set during afterSwap.

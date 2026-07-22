@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"html/template"
 	iofs "io/fs"
 	"net/http"
@@ -31,6 +32,10 @@ type server struct {
 	root     string
 	profiles []string
 	selected map[string]bool
+
+	// fp is the on-disk fingerprint of the project state that was last
+	// rendered; /watch re-renders only when the disk no longer matches.
+	fp string
 
 	// prefsFile persists the profile selection per project root across
 	// restarts; empty disables persistence. saved holds its content.
@@ -80,6 +85,7 @@ func newServer(prefsFile string) (*server, error) {
 	s.mux.HandleFunc("POST /open", s.open)
 	s.mux.HandleFunc("POST /profiles", s.setProfiles)
 	s.mux.HandleFunc("GET /tree", s.treeHandler)
+	s.mux.HandleFunc("GET /watch", s.watch)
 	s.mux.HandleFunc("POST /move", s.move)
 	s.mux.HandleFunc("POST /create", s.create)
 	s.mux.HandleFunc("POST /delete", s.delete)
@@ -118,9 +124,77 @@ func (s *server) render(w http.ResponseWriter, name string, data any) {
 	}
 }
 
+// fingerprint hashes everything the tree pane and profile row are
+// rendered from: the paths, sizes, and mtimes of the project's .qmd files
+// and _quarto*.yml configs. Equal fingerprints mean no refresh is needed.
+func fingerprint(root string) string {
+	h := fnv.New64a()
+	filepath.WalkDir(root, func(p string, d iofs.DirEntry, err error) error {
+		if err != nil {
+			return nil // unreadable entries just drop out of the hash
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if p != root && (strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		qmd := strings.HasSuffix(name, ".qmd") && !strings.HasPrefix(name, "_")
+		cfg := filepath.Dir(p) == root && strings.HasSuffix(name, ".yml") &&
+			(name == "_quarto.yml" || strings.HasPrefix(name, "_quarto-"))
+		if !qmd && !cfg {
+			return nil
+		}
+		if fi, err := d.Info(); err == nil {
+			fmt.Fprintf(h, "%s|%d|%d;", p, fi.Size(), fi.ModTime().UnixNano())
+		}
+		return nil
+	})
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+
+// rememberFP records the current on-disk fingerprint as rendered, so
+// /watch stays quiet until something changes outside the responses we
+// produce ourselves. The caller must hold s.mu.
+func (s *server) rememberFP() {
+	if s.root != "" {
+		s.fp = fingerprint(s.root)
+	}
+}
+
+// refreshProfiles rescans the project's book profiles, keeping the
+// selection of profiles it already knows. A newly appearing profile is
+// selected if it is part of the project's saved selection, or if the user
+// never customized the selection (matching the select-all default).
+// It reports whether the profile row changed. The caller must hold s.mu.
+func (s *server) refreshProfiles() bool {
+	if s.root == "" {
+		return false
+	}
+	profiles, err := project.Profiles(s.root)
+	if err != nil {
+		return false
+	}
+	saved, customized := s.saved[s.root]
+	selected := map[string]bool{}
+	for _, p := range profiles {
+		if slices.Contains(s.profiles, p) {
+			selected[p] = s.selected[p]
+		} else {
+			selected[p] = !customized || slices.Contains(saved, p)
+		}
+	}
+	changed := !slices.Equal(profiles, s.profiles)
+	s.profiles, s.selected = profiles, selected
+	return changed
+}
+
 func (s *server) page(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.refreshProfiles()
+	s.rememberFP()
 	st, err := s.load()
 	if err != nil {
 		st.Error = err.Error()
@@ -146,13 +220,19 @@ func (s *server) open(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.rememberFP()
 	st, err := s.load()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	s.render(w, "main", st)
-	// Refresh the profile checkboxes in the header out of band.
+	s.renderProfilesOOB(w, st)
+}
+
+// renderProfilesOOB appends an out-of-band refresh of the profile
+// checkbox row in the header. The caller must hold s.mu.
+func (s *server) renderProfilesOOB(w http.ResponseWriter, st state) {
 	fmt.Fprint(w, `<div hx-swap-oob="innerHTML:#profiles-form">`)
 	s.render(w, "profiles", st)
 	fmt.Fprint(w, `</div>`)
@@ -228,8 +308,12 @@ func (s *server) treeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // renderTree renders the tree fragment, prefixed with an error banner if
-// msg is non-empty. The caller must hold s.mu.
+// msg is non-empty. If the set of book profiles changed on disk, the
+// profile row in the header is refreshed out of band along with the tree.
+// The caller must hold s.mu.
 func (s *server) renderTree(w http.ResponseWriter, msg string) {
+	profilesChanged := s.refreshProfiles()
+	s.rememberFP()
 	st, err := s.load()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -241,6 +325,22 @@ func (s *server) renderTree(w http.ResponseWriter, msg string) {
 	}
 	st.Error = msg
 	s.render(w, "treewrap", st)
+	if profilesChanged {
+		s.renderProfilesOOB(w, st)
+	}
+}
+
+// watch is polled by the client. It re-renders the tree (and, when
+// needed, the profile row) only when the project changed on disk outside
+// the sorter; 204 tells htmx to leave the page alone.
+func (s *server) watch(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.root == "" || fingerprint(s.root) == s.fp {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	s.renderTree(w, "")
 }
 
 // apply runs op on a freshly loaded tree, syncs the chapter lists of the
@@ -296,8 +396,17 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = name
 	}
+	// The top-bar form inserts after the page selected in the tree (its
+	// path travels as "after"); the per-node ＋ button appends a child to
+	// its parent instead.
+	parent, after := r.FormValue("parent"), r.FormValue("after")
 	s.apply(w, func(t *project.Tree) error {
-		_, err := t.CreatePage(r.FormValue("parent"), name, title)
+		var err error
+		if parent == "" && after != "" {
+			_, err = t.CreatePageAfter(after, name, title)
+		} else {
+			_, err = t.CreatePage(parent, name, title)
+		}
 		return err
 	})
 }
@@ -376,14 +485,21 @@ func (s *server) save(w http.ResponseWriter, r *http.Request) {
 	if title != project.ParseFrontmatter(old).Title {
 		s.renderTreeOOB(w)
 	}
+	// Our own write must not look like an outside change to /watch.
+	s.rememberFP()
 }
 
 // renderTreeOOB appends an out-of-band refresh of the tree pane to the
 // response. The caller must hold s.mu.
 func (s *server) renderTreeOOB(w http.ResponseWriter) {
+	profilesChanged := s.refreshProfiles()
+	s.rememberFP()
 	if st, err := s.load(); err == nil && st.Tree != nil {
 		fmt.Fprint(w, `<div hx-swap-oob="innerHTML:#tree">`)
 		s.render(w, "treewrap", st)
 		fmt.Fprint(w, `</div>`)
+		if profilesChanged {
+			s.renderProfilesOOB(w, st)
+		}
 	}
 }
