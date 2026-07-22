@@ -244,7 +244,9 @@ func (t *Tree) Chapters() []string {
 	return out
 }
 
-// Profiles returns the profile names of all _quarto-<name>.yml files in root.
+// Profiles returns the profile names of the _quarto-<name>.yml files in
+// root that configure a book (contain a top-level book key). Only these
+// profiles maintain a chapter list.
 func Profiles(root string) ([]string, error) {
 	matches, err := filepath.Glob(filepath.Join(root, "_quarto-*.yml"))
 	if err != nil {
@@ -252,8 +254,14 @@ func Profiles(root string) ([]string, error) {
 	}
 	var names []string
 	for _, m := range matches {
-		name := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "_quarto-"), ".yml")
-		names = append(names, name)
+		src, err := os.ReadFile(m)
+		if err != nil {
+			return nil, err
+		}
+		if !hasBook(src) {
+			continue
+		}
+		names = append(names, strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "_quarto-"), ".yml"))
 	}
 	sort.Strings(names)
 	return names, nil
