@@ -36,7 +36,7 @@ After every drag and drop, Quarto Sorter updates:
 1. **`order` fields** — the destination sibling group is renumbered 1…n to match what you see, so previously unordered pages there become ordered. In the group the page left, ordered pages close the gap and unordered pages stay unordered.
 2. **Files on disk** — moving a page under another chapter moves the `.qmd` file (and, for a section, its whole directory) into the parent's directory. `chapter/index.qmd`-style and `chapter.qmd`-plus-directory sections are both supported.
 3. **Heading levels** — when a page's depth changes, all Markdown headings in the affected files shift by the depth difference (clamped to `#`…`######`; code fences are left alone). This compensates for Quarto counting only Markdown heading levels, not folder depth.
-4. **Chapter lists** — the `book.chapters` list is rewritten (in tree order, depth first) in every profile selected in the top bar (`_quarto-<name>.yml`), and in `_quarto.yml` itself if it already has one. Deselect a profile to leave its config untouched.
+4. **Chapter lists** — the `book.chapters` list is rewritten (in tree order, depth first) in every profile selected in the top bar (`_quarto-<name>.yml`), and in `_quarto.yml` itself if it already has one. Deselect a profile to leave its config untouched. When a list would start with a subfolder's section page (`<folder>/index.qmd`), it is written as a bare `index.qmd` instead, since Quarto only accepts a plain root `index.qmd` as a book's first chapter; point that root `index.qmd` at the folder's real section page with an include.
 
 The tree — that is, the filesystem plus the `order` frontmatter — is the
 single source of truth; chapter lists are generated from it.
