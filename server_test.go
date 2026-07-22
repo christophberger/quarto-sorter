@@ -23,14 +23,15 @@ func fixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"index.qmd":           "---\ntitle: Home\norder: 1\n---\n# Home\n",
-		"chapter2/index.qmd":  "---\ntitle: Chapter 2\norder: 2\n---\n# Two\n",
-		"chapter2/second.qmd": "---\ntitle: Second\norder: 1\n---\n# Second\n",
-		"chapter2/third.qmd":  "---\ntitle: Third\norder: 2\n---\n# Third\n",
-		"chapter2/loose.qmd":  "---\ntitle: Loose\n---\n# Loose\n",
-		"chapter2/broken.qmd": "---\ntitle: Broken\norder: 3\n---\n::: {.callout-note}\nunclosed\n",
-		"_quarto.yml":         "project:\n  type: book\nbook:\n  chapters:\n    - index.qmd\n",
-		"_quarto-print.yml":   "book:\n  chapters:\n    - index.qmd\n",
+		"index.qmd":            "---\ntitle: Home\norder: 1\n---\n# Home\n",
+		"chapter2/index.qmd":   "---\ntitle: Chapter 2\norder: 2\n---\n# Two\n",
+		"chapter2/second.qmd":  "---\ntitle: Second\norder: 1\n---\n# Second\n",
+		"chapter2/third.qmd":   "---\ntitle: Third\norder: 2\n---\n# Third\n",
+		"chapter2/loose.qmd":   "---\ntitle: Loose\n---\n# Loose\n",
+		"chapter2/broken.qmd":  "---\ntitle: Broken\norder: 3\n---\n::: {.callout-note}\nunclosed\n",
+		"_quarto.yml":          "project:\n  type: book\nbook:\n  chapters:\n    - index.qmd\n",
+		"_quarto-chapter2.yml": "book:\n  chapters:\n    - index.qmd\n",
+		"_quarto-web.yml":      "format:\n  html: default\n",
 	}
 	for name, content := range files {
 		p := filepath.Join(root, name)
@@ -79,11 +80,14 @@ func TestOpenRendersTree(t *testing.T) {
 		`data-path="chapter2/second.qmd"`,
 		`data-parent="chapter2/index.qmd"`,
 		"Second",
-		`value="print"`, // profile checkbox
+		`value="chapter2"`, // profile checkbox
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page missing %q", want)
 		}
+	}
+	if strings.Contains(body, `value="web"`) {
+		t.Errorf("profile without book key rendered as checkbox:\n%s", body)
 	}
 	if !strings.Contains(body, `unordered" data-path="chapter2/loose.qmd"`) {
 		t.Errorf("loose.qmd not marked unordered:\n%s", body)
@@ -108,7 +112,7 @@ func TestMoveUpdatesFilesAndYaml(t *testing.T) {
 	if strings.Index(body, "chapter2/third.qmd") > strings.Index(body, "chapter2/second.qmd") {
 		t.Errorf("third not before second:\n%s", body)
 	}
-	for _, cfg := range []string{"_quarto.yml", "_quarto-print.yml"} {
+	for _, cfg := range []string{"_quarto.yml", "_quarto-chapter2.yml"} {
 		yml, _ := os.ReadFile(filepath.Join(root, cfg))
 		s := string(yml)
 		if !strings.Contains(s, "- chapter2/third.qmd") {
@@ -129,9 +133,9 @@ func TestProfileSelectionLimitsYamlWrites(t *testing.T) {
 	post(t, srv, "/move", url.Values{
 		"src": {"chapter2/third.qmd"}, "parent": {"chapter2/index.qmd"}, "pos": {"0"},
 	})
-	yml, _ := os.ReadFile(filepath.Join(root, "_quarto-print.yml"))
+	yml, _ := os.ReadFile(filepath.Join(root, "_quarto-chapter2.yml"))
 	if strings.Contains(string(yml), "third.qmd") {
-		t.Errorf("_quarto-print.yml written although deselected: %s", yml)
+		t.Errorf("_quarto-chapter2.yml written although deselected: %s", yml)
 	}
 }
 
@@ -156,7 +160,7 @@ func TestProfileSelectionPersistsPerProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	post(t, srv, "/open", url.Values{"path": {root}})
-	if !checkboxChecked(t, srv, "print") {
+	if !checkboxChecked(t, srv, "chapter2") {
 		t.Fatal("profile not selected by default")
 	}
 	// Deselect all profiles; the empty selection must be saved for root.
@@ -167,11 +171,11 @@ func TestProfileSelectionPersistsPerProject(t *testing.T) {
 	// Switching to another project and back restores the saved selection.
 	other := fixture(t)
 	post(t, srv, "/open", url.Values{"path": {other}})
-	if !checkboxChecked(t, srv, "print") {
+	if !checkboxChecked(t, srv, "chapter2") {
 		t.Error("fresh project should default to all profiles selected")
 	}
 	post(t, srv, "/open", url.Values{"path": {root}})
-	if checkboxChecked(t, srv, "print") {
+	if checkboxChecked(t, srv, "chapter2") {
 		t.Error("deselection not restored after switching projects")
 	}
 
@@ -181,13 +185,13 @@ func TestProfileSelectionPersistsPerProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	post(t, srv2, "/open", url.Values{"path": {root}})
-	if checkboxChecked(t, srv2, "print") {
+	if checkboxChecked(t, srv2, "chapter2") {
 		t.Error("deselection not restored after restart")
 	}
-	post(t, srv2, "/profiles", url.Values{"profile": {"print"}})
+	post(t, srv2, "/profiles", url.Values{"profile": {"chapter2"}})
 	post(t, srv2, "/open", url.Values{"path": {other}})
 	post(t, srv2, "/open", url.Values{"path": {root}})
-	if !checkboxChecked(t, srv2, "print") {
+	if !checkboxChecked(t, srv2, "chapter2") {
 		t.Error("reselection not restored after switching projects")
 	}
 }
@@ -197,7 +201,7 @@ func TestSavedSelectionIgnoresRemovedProfiles(t *testing.T) {
 	prefs := filepath.Join(t.TempDir(), "profiles.json")
 	// A saved selection may reference a profile whose config was deleted
 	// since; it must neither show up nor break the restore.
-	b, err := json.Marshal(map[string][]string{root: {"print", "gone"}})
+	b, err := json.Marshal(map[string][]string{root: {"chapter2", "gone"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +218,7 @@ func TestSavedSelectionIgnoresRemovedProfiles(t *testing.T) {
 	if strings.Contains(body, `value="gone"`) {
 		t.Errorf("nonexistent profile rendered:\n%s", body)
 	}
-	if !checkboxChecked(t, srv, "print") {
+	if !checkboxChecked(t, srv, "chapter2") {
 		t.Error("existing profile not restored")
 	}
 }

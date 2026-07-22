@@ -58,15 +58,16 @@ func TestUpdateChaptersEmptyDoc(t *testing.T) {
 	}
 }
 
-// WriteChapters updates _quarto.yml (which has book.chapters) and the
-// selected profiles only.
+// WriteChapters updates _quarto.yml (which has book.chapters) with the full
+// list and each selected book profile with the chapters of its own folder.
+// A selected profile without a book key is left untouched.
 func TestWriteChapters(t *testing.T) {
 	root := writeFixture(t)
 	tree, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tree.WriteChapters([]string{"print"}); err != nil {
+	if err := tree.WriteChapters([]string{"chapter2", "web"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,14 +79,64 @@ func TestWriteChapters(t *testing.T) {
 		t.Errorf("_quarto.yml lost content:\n%s", main)
 	}
 
-	print_, _ := os.ReadFile(filepath.Join(root, "_quarto-print.yml"))
-	if !strings.Contains(string(print_), "- chapter2/second.qmd") {
-		t.Errorf("_quarto-print.yml not updated:\n%s", print_)
+	ch2, _ := os.ReadFile(filepath.Join(root, "_quarto-chapter2.yml"))
+	for _, want := range []string{"- chapter2/index.qmd", "- chapter2/second.qmd", "- chapter2/fourth.qmd"} {
+		if !strings.Contains(string(ch2), want) {
+			t.Errorf("_quarto-chapter2.yml missing %q:\n%s", want, ch2)
+		}
+	}
+	for _, stray := range []string{"chapter3", "- index.qmd"} {
+		if strings.Contains(string(ch2), stray) {
+			t.Errorf("_quarto-chapter2.yml contains %q from outside its folder:\n%s", stray, ch2)
+		}
+	}
+
+	ch3, _ := os.ReadFile(filepath.Join(root, "_quarto-chapter3-pol.yml"))
+	if strings.Contains(string(ch3), "chapter3.qmd") {
+		t.Errorf("_quarto-chapter3-pol.yml should be untouched (not selected):\n%s", ch3)
 	}
 
 	web, _ := os.ReadFile(filepath.Join(root, "_quarto-web.yml"))
 	if strings.Contains(string(web), "chapters") {
-		t.Errorf("_quarto-web.yml should be untouched (not selected):\n%s", web)
+		t.Errorf("_quarto-web.yml should be untouched (no book key):\n%s", web)
+	}
+}
+
+// A flavor profile (<folder>-pol, <folder>-fw) gets the chapters of its base
+// folder, including the folder's section page.
+func TestWriteChaptersFlavorProfile(t *testing.T) {
+	root := writeFixture(t)
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.WriteChapters([]string{"chapter3-pol"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(root, "_quarto-chapter3-pol.yml"))
+	for _, want := range []string{"- chapter3.qmd", "- chapter3/another.qmd", "- chapter3/deep/leaf.qmd"} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("_quarto-chapter3-pol.yml missing %q:\n%s", want, got)
+		}
+	}
+	for _, stray := range []string{"chapter2", "- index.qmd"} {
+		if strings.Contains(string(got), stray) {
+			t.Errorf("_quarto-chapter3-pol.yml contains %q from outside its folder:\n%s", stray, got)
+		}
+	}
+}
+
+func TestProfileDir(t *testing.T) {
+	for name, want := range map[string]string{
+		"sysadmin":         "sysadmin",
+		"calltaker-pol":    "calltaker",
+		"calltaker-fw":     "calltaker",
+		"calltaker-pol-fw": "calltaker",
+		"netfw":            "netfw", // no "-" boundary, not a flavor suffix
+	} {
+		if got := profileDir(name); got != want {
+			t.Errorf("profileDir(%q) = %q, want %q", name, got, want)
+		}
 	}
 }
 

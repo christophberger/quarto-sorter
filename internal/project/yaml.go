@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -70,9 +71,52 @@ func hasChapters(src []byte) bool {
 	return doc.Book.Chapters != nil
 }
 
-// WriteChapters writes the tree's chapter list into the book.chapters key
-// of each selected profile config (_quarto-<name>.yml), and of _quarto.yml
-// if it already maintains a chapter list.
+// hasBook reports whether the yaml document contains a top-level book key.
+func hasBook(src []byte) bool {
+	var doc map[string]any
+	if err := yaml.Unmarshal(src, &doc); err != nil {
+		return false
+	}
+	_, ok := doc["book"]
+	return ok
+}
+
+// flavorSuffixes are profile name suffixes that select a flavor of a book
+// but do not change the folder the book's chapters live in.
+var flavorSuffixes = []string{"-fw", "-pol"}
+
+// profileDir returns the folder a book profile's chapters live in: the
+// profile name with any flavor suffixes removed (calltaker-pol → calltaker).
+func profileDir(name string) string {
+	for trimmed := true; trimmed; {
+		trimmed = false
+		for _, suf := range flavorSuffixes {
+			if len(name) > len(suf) && strings.EqualFold(name[len(name)-len(suf):], suf) {
+				name, trimmed = name[:len(name)-len(suf)], true
+			}
+		}
+	}
+	return name
+}
+
+// folderChapters returns the chapters that belong to dir: the pages inside
+// the folder, plus the folder's section page (dir.qmd) if present.
+func folderChapters(chapters []string, dir string) []string {
+	out := []string{}
+	for _, c := range chapters {
+		if c == dir+".qmd" || strings.HasPrefix(c, dir+"/") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// WriteChapters writes chapter lists into the book.chapters key of each
+// selected profile config (_quarto-<name>.yml) that configures a book, and
+// of _quarto.yml if it already maintains a chapter list. _quarto.yml gets
+// the full list; each profile gets only the chapters of its own folder,
+// named after the profile minus flavor suffixes. Selected profiles without
+// a book key are left untouched.
 func (t *Tree) WriteChapters(profiles []string) error {
 	chapters := t.Chapters()
 	main := filepath.Join(t.Root, "_quarto.yml")
@@ -87,7 +131,10 @@ func (t *Tree) WriteChapters(profiles []string) error {
 		if err != nil {
 			return err
 		}
-		if err := updateChaptersFile(file, src, chapters); err != nil {
+		if !hasBook(src) {
+			continue
+		}
+		if err := updateChaptersFile(file, src, folderChapters(chapters, profileDir(p))); err != nil {
 			return err
 		}
 	}
