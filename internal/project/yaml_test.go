@@ -80,13 +80,15 @@ func TestWriteChapters(t *testing.T) {
 		t.Errorf("_quarto.yml lost content:\n%s", main)
 	}
 
+	// The folder's section page leads the list as a bare index.qmd, not
+	// chapter2/index.qmd, so Quarto accepts it as the book's first chapter.
 	ch2, _ := os.ReadFile(filepath.Join(root, "_quarto-chapter2.yml"))
-	for _, want := range []string{"- chapter2/index.qmd", "- chapter2/second.qmd", "- chapter2/fourth.qmd"} {
+	for _, want := range []string{"- index.qmd", "- chapter2/second.qmd", "- chapter2/fourth.qmd"} {
 		if !strings.Contains(string(ch2), want) {
 			t.Errorf("_quarto-chapter2.yml missing %q:\n%s", want, ch2)
 		}
 	}
-	for _, stray := range []string{"chapter3", "- index.qmd"} {
+	for _, stray := range []string{"chapter3", "chapter2/index.qmd"} {
 		if strings.Contains(string(ch2), stray) {
 			t.Errorf("_quarto-chapter2.yml contains %q from outside its folder:\n%s", stray, ch2)
 		}
@@ -123,6 +125,36 @@ func TestWriteChaptersFlavorProfile(t *testing.T) {
 	for _, stray := range []string{"chapter2", "- index.qmd"} {
 		if strings.Contains(string(got), stray) {
 			t.Errorf("_quarto-chapter3-pol.yml contains %q from outside its folder:\n%s", stray, got)
+		}
+	}
+}
+
+func TestTopLevelIndex(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			"subfolder section leads",
+			[]string{"chapter2/index.qmd", "chapter2/second.qmd", "b/index.qmd"},
+			[]string{"index.qmd", "chapter2/second.qmd", "b/index.qmd"},
+		},
+		{
+			"root index unchanged",
+			[]string{"index.qmd", "chapter2/index.qmd"},
+			[]string{"index.qmd", "chapter2/index.qmd"},
+		},
+		{
+			"non-index leading page unchanged",
+			[]string{"chapter3.qmd", "chapter3/another.qmd"},
+			[]string{"chapter3.qmd", "chapter3/another.qmd"},
+		},
+		{"empty", nil, nil},
+	}
+	for _, tt := range tests {
+		if got := topLevelIndex(tt.in); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("topLevelIndex(%v) = %v, want %v", tt.in, got, tt.want)
 		}
 	}
 }
@@ -185,10 +217,13 @@ func TestWriteChaptersFlavorFiltering(t *testing.T) {
 	}
 
 	pol, _ := os.ReadFile(filepath.Join(root, "_quarto-calltaker-pol.yml"))
-	for _, want := range []string{"- calltaker/index.qmd", "- calltaker/base.qmd", "- calltaker/arrest_POL.qmd"} {
+	for _, want := range []string{"- index.qmd", "- calltaker/base.qmd", "- calltaker/arrest_POL.qmd"} {
 		if !strings.Contains(string(pol), want) {
 			t.Errorf("pol profile missing %q:\n%s", want, pol)
 		}
+	}
+	if strings.Contains(string(pol), "calltaker/index.qmd") {
+		t.Errorf("pol profile still leads with calltaker/index.qmd:\n%s", pol)
 	}
 	for _, stray := range []string{"alarm_FW", "drills_FW"} {
 		if strings.Contains(string(pol), stray) {
@@ -198,12 +233,15 @@ func TestWriteChaptersFlavorFiltering(t *testing.T) {
 
 	fw, _ := os.ReadFile(filepath.Join(root, "_quarto-calltaker-fw.yml"))
 	for _, want := range []string{
-		"- calltaker/index.qmd", "- calltaker/base.qmd", "- calltaker/alarm_FW.qmd",
+		"- index.qmd", "- calltaker/base.qmd", "- calltaker/alarm_FW.qmd",
 		"- calltaker/drills_FW/index.qmd", "- calltaker/drills_FW/one.qmd",
 	} {
 		if !strings.Contains(string(fw), want) {
 			t.Errorf("fw profile missing %q:\n%s", want, fw)
 		}
+	}
+	if strings.Contains(string(fw), "calltaker/index.qmd") {
+		t.Errorf("fw profile still leads with calltaker/index.qmd:\n%s", fw)
 	}
 	if strings.Contains(string(fw), "arrest_POL") {
 		t.Errorf("fw profile contains POL page:\n%s", fw)

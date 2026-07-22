@@ -3,6 +3,7 @@ package project
 import (
 	"bytes"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -134,7 +135,7 @@ func (t *Tree) profileChapters(name string) []string {
 func (t *Tree) WriteChapters(profiles []string) error {
 	main := filepath.Join(t.Root, "_quarto.yml")
 	if src, err := os.ReadFile(main); err == nil && hasChapters(src) {
-		if err := updateChaptersFile(main, src, t.Chapters()); err != nil {
+		if err := updateChaptersFile(main, src, topLevelIndex(t.Chapters())); err != nil {
 			return err
 		}
 	}
@@ -147,11 +148,31 @@ func (t *Tree) WriteChapters(profiles []string) error {
 		if !hasBook(src) {
 			continue
 		}
-		if err := updateChaptersFile(file, src, t.profileChapters(p)); err != nil {
+		if err := updateChaptersFile(file, src, topLevelIndex(t.profileChapters(p))); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// topLevelIndex rewrites a chapter list whose first entry is a subfolder's
+// section page ("<dir>/index.qmd") to start with a bare "index.qmd". Quarto
+// requires a book's opening chapter to be a plain index.qmd at the project
+// root; books kept in subfolders satisfy this with a root index.qmd that
+// includes the folder's real section page. Only the leading entry is
+// touched — later "<dir>/index.qmd" subsections are left as they are.
+func topLevelIndex(chapters []string) []string {
+	if len(chapters) == 0 {
+		return chapters
+	}
+	first := chapters[0]
+	if path.Base(first) != "index.qmd" || path.Dir(first) == "." {
+		return chapters
+	}
+	out := make([]string, len(chapters))
+	copy(out, chapters)
+	out[0] = "index.qmd"
+	return out
 }
 
 func updateChaptersFile(file string, src []byte, chapters []string) error {
