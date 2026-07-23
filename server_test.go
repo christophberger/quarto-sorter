@@ -396,6 +396,30 @@ func TestWatchRefreshesProfiles(t *testing.T) {
 	}
 }
 
+// fingerprint tracks _quarto-*.yml configs in immediate subfolders
+// (subprojects in multiproject mode), not just at the root.
+func TestFingerprintTracksSubprojectConfigs(t *testing.T) {
+	root := fixture(t)
+	fp1 := fingerprint(root)
+
+	cfg := filepath.Join(root, "chapter2", "_quarto-sub.yml")
+	if err := os.WriteFile(cfg, []byte("make:\n  handout:\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fp2 := fingerprint(root)
+	if fp2 == fp1 {
+		t.Errorf("fingerprint unchanged after adding a subfolder config")
+	}
+
+	if err := os.WriteFile(cfg, []byte("make:\n  handout:\n  slides:\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fp3 := fingerprint(root)
+	if fp3 == fp2 {
+		t.Errorf("fingerprint unchanged after modifying a subfolder config")
+	}
+}
+
 func TestOpenBadPath(t *testing.T) {
 	srv, err := newServer("")
 	if err != nil {
