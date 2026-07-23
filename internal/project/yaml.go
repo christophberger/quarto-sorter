@@ -82,6 +82,18 @@ func hasBook(src []byte) bool {
 	return ok
 }
 
+// hasMake reports whether the yaml document contains a top-level make key.
+// The make key (listing output profile names) marks a subproject's
+// _quarto-<name>.yml as a flavor profile in multiproject mode.
+func hasMake(src []byte) bool {
+	var doc map[string]any
+	if err := yaml.Unmarshal(src, &doc); err != nil {
+		return false
+	}
+	_, ok := doc["make"]
+	return ok
+}
+
 // flavorMarkers maps a profile flavor suffix to the page marker it selects.
 var flavorMarkers = map[string]string{"fw": markerFW, "pol": markerPOL}
 
@@ -102,6 +114,22 @@ func profileTarget(name string) (dir string, markers map[string]bool) {
 		}
 	}
 	return name, markers
+}
+
+// flavorOf returns the page markers a multiproject flavor profile name
+// selects: every dash-separated token naming a known flavor contributes
+// its marker (handout-fw → FW, fw-pol → FW and POL). No matching token
+// means no flavor: the profile takes every page.
+func flavorOf(name string) map[string]bool {
+	markers := map[string]bool{}
+	for _, tok := range strings.Split(name, "-") {
+		for flavor, marker := range flavorMarkers {
+			if strings.EqualFold(tok, flavor) {
+				markers[marker] = true
+			}
+		}
+	}
+	return markers
 }
 
 // profileChapters returns the chapter list for the named profile: the
@@ -126,18 +154,56 @@ func (t *Tree) profileChapters(name string) []string {
 	return out
 }
 
-// WriteChapters writes chapter lists into the book.chapters key of each
-// selected profile config (_quarto-<name>.yml) that configures a book, and
-// of _quarto.yml if it already maintains a chapter list. _quarto.yml gets
-// the full list; each profile gets only the chapters of its own folder,
-// named after the profile minus flavor suffixes, filtered to the profile's
-// flavor. Selected profiles without a book key are left untouched.
+// subChapters returns the chapter list of the subproject in folder sub:
+// its pages in display order, with paths relative to the subfolder (each
+// subfolder is its own Quarto project), without pages marked for a
+// different flavor. Unmarked pages belong to every flavor.
+func (t *Tree) subChapters(sub string, markers map[string]bool) []string {
+	prefix := sub + "/"
+	out := []string{}
+	var walk func([]*Page)
+	walk = func(pages []*Page) {
+		for _, p := range pages {
+			if p.Path != "" && strings.HasPrefix(p.Path, prefix) &&
+				(len(markers) == 0 || p.Marker == "" || markers[p.Marker]) {
+				out = append(out, strings.TrimPrefix(p.Path, prefix))
+			}
+			walk(p.Children)
+		}
+	}
+	walk(t.Pages)
+	return out
+}
+
+// WriteChapters writes the chapter lists derived from the tree into the
+// project's configs. _quarto.yml gets the full list if it already
+// maintains a chapter list.
+//
+// In a multiproject root (subfolders with their own _quarto.yml), each
+// subproject's _quarto.yml that configures a book gets the chapters of
+// its folder — every subproject, selected or not, so that a page moved
+// across subfolders leaves the source list and enters the target one —
+// and each selected flavor profile (<sub>/<name>) gets that list
+// filtered to the profile's flavor. Chapter paths are relative to the
+// subfolder.
+//
+// Otherwise, each selected profile config (_quarto-<name>.yml) that
+// configures a book gets the chapters of its own folder, named after the
+// profile minus flavor suffixes, filtered to the profile's flavor.
+// Selected profiles without a book key are left untouched.
 func (t *Tree) WriteChapters(profiles []string) error {
 	main := filepath.Join(t.Root, "_quarto.yml")
 	if src, err := os.ReadFile(main); err == nil && hasChapters(src) {
 		if err := updateChaptersFile(main, src, topLevelIndex(t.Chapters())); err != nil {
 			return err
 		}
+	}
+	subs, err := Subprojects(t.Root)
+	if err != nil {
+		return err
+	}
+	if len(subs) > 0 {
+		return t.writeSubprojectChapters(subs, profiles)
 	}
 	for _, p := range profiles {
 		file := filepath.Join(t.Root, "_quarto-"+p+".yml")
@@ -149,6 +215,41 @@ func (t *Tree) WriteChapters(profiles []string) error {
 			continue
 		}
 		if err := updateChaptersFile(file, src, topLevelIndex(t.profileChapters(p))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeSubprojectChapters syncs the configs of a multiproject root; see
+// WriteChapters. Flavor profiles are written even without a book key:
+// they are book config fragments layered over the subproject's
+// _quarto.yml, so book.chapters is created when missing.
+func (t *Tree) writeSubprojectChapters(subs, profiles []string) error {
+	for _, sub := range subs {
+		file := filepath.Join(t.Root, sub, "_quarto.yml")
+		src, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		if !hasBook(src) {
+			continue
+		}
+		if err := updateChaptersFile(file, src, topLevelIndex(t.subChapters(sub, nil))); err != nil {
+			return err
+		}
+	}
+	for _, p := range profiles {
+		sub, name, ok := strings.Cut(p, "/")
+		if !ok {
+			continue
+		}
+		file := filepath.Join(t.Root, sub, "_quarto-"+name+".yml")
+		src, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		if err := updateChaptersFile(file, src, topLevelIndex(t.subChapters(sub, flavorOf(name)))); err != nil {
 			return err
 		}
 	}

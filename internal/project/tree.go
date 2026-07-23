@@ -244,10 +244,43 @@ func (t *Tree) Chapters() []string {
 	return out
 }
 
-// Profiles returns the profile names of the _quarto-<name>.yml files in
-// root that configure a book (contain a top-level book key). Only these
-// profiles maintain a chapter list.
+// Subprojects returns the names of the immediate subfolders of root that
+// hold their own Quarto project (contain a _quarto.yml). A non-empty
+// result switches the sorter to multiproject mode: the root is a website
+// project whose books live in the subfolders.
+func Subprojects(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	var subs []string
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, name, "_quarto.yml")); err == nil {
+			subs = append(subs, name)
+		}
+	}
+	sort.Strings(subs)
+	return subs, nil
+}
+
+// Profiles returns the sorter's profile names for root. In a multiproject
+// root these are the flavor profiles of each subproject — _quarto-<name>.yml
+// files with a top-level make key, listed as <subfolder>/<name>. Otherwise
+// they are the root's _quarto-<name>.yml files that configure a book
+// (contain a top-level book key). Only these profiles maintain a chapter
+// list.
 func Profiles(root string) ([]string, error) {
+	subs, err := Subprojects(root)
+	if err != nil {
+		return nil, err
+	}
+	if len(subs) > 0 {
+		return subprojectProfiles(root, subs)
+	}
 	matches, err := filepath.Glob(filepath.Join(root, "_quarto-*.yml"))
 	if err != nil {
 		return nil, err
@@ -262,6 +295,30 @@ func Profiles(root string) ([]string, error) {
 			continue
 		}
 		names = append(names, strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "_quarto-"), ".yml"))
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// subprojectProfiles returns the flavor profiles of each subproject,
+// listed as <subfolder>/<name>.
+func subprojectProfiles(root string, subs []string) ([]string, error) {
+	var names []string
+	for _, sub := range subs {
+		matches, err := filepath.Glob(filepath.Join(root, sub, "_quarto-*.yml"))
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range matches {
+			src, err := os.ReadFile(m)
+			if err != nil {
+				return nil, err
+			}
+			if !hasMake(src) {
+				continue
+			}
+			names = append(names, sub+"/"+strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "_quarto-"), ".yml"))
+		}
 	}
 	sort.Strings(names)
 	return names, nil

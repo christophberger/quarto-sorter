@@ -126,7 +126,9 @@ func (s *server) render(w http.ResponseWriter, name string, data any) {
 
 // fingerprint hashes everything the tree pane and profile row are
 // rendered from: the paths, sizes, and mtimes of the project's .qmd files
-// and _quarto*.yml configs. Equal fingerprints mean no refresh is needed.
+// and the _quarto*.yml configs at the root and in immediate subfolders
+// (subprojects in multiproject mode). Equal fingerprints mean no refresh
+// is needed.
 func fingerprint(root string) string {
 	h := fnv.New64a()
 	filepath.WalkDir(root, func(p string, d iofs.DirEntry, err error) error {
@@ -141,7 +143,8 @@ func fingerprint(root string) string {
 			return nil
 		}
 		qmd := strings.HasSuffix(name, ".qmd") && !strings.HasPrefix(name, "_")
-		cfg := filepath.Dir(p) == root && strings.HasSuffix(name, ".yml") &&
+		dir := filepath.Dir(p)
+		cfg := (dir == root || filepath.Dir(dir) == root) && strings.HasSuffix(name, ".yml") &&
 			(name == "_quarto.yml" || strings.HasPrefix(name, "_quarto-"))
 		if !qmd && !cfg {
 			return nil
