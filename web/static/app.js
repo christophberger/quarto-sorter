@@ -4,8 +4,35 @@ var sortableInstances = [];
 
 // Collapsed branches, keyed by each node's data-key. #tree is fully
 // re-rendered on every move/create/delete/save, so this module-level state
-// is what keeps collapsed branches collapsed across those re-renders.
+// is what keeps collapsed branches collapsed across those re-renders. It is
+// mirrored into localStorage (see load/saveCollapsed) so the expand/collapse
+// state also survives a full page reload and future sessions.
 var collapsed = new Set();
+
+var COLLAPSED_KEY = 'collapsedKeys';
+
+// loadCollapsed seeds the in-memory set from localStorage on startup.
+function loadCollapsed() {
+  try {
+    var raw = localStorage.getItem(COLLAPSED_KEY);
+    if (raw) {
+      JSON.parse(raw).forEach(function (key) {
+        collapsed.add(key);
+      });
+    }
+  } catch (e) {
+    // Ignore malformed or unavailable storage; start from an empty set.
+  }
+}
+
+// saveCollapsed persists the current set after every change to it.
+function saveCollapsed() {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify(Array.from(collapsed)));
+  } catch (e) {
+    // Ignore storage quota/availability errors; in-memory state still works.
+  }
+}
 
 // applyCollapsed re-applies the persisted collapsed state to the freshly
 // rendered tree.
@@ -121,6 +148,7 @@ function applySelection() {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
+  loadCollapsed();
   initTree();
   initDivider();
 });
@@ -183,6 +211,26 @@ document.body.addEventListener('click', function (evt) {
     return;
   }
 
+  // Expand all: forget every collapsed branch and reveal each subtree.
+  if (evt.target.closest('#expand-all')) {
+    collapsed.clear();
+    document.querySelectorAll('#tree li.page.has-children').forEach(function (li) {
+      li.classList.remove('collapsed');
+    });
+    saveCollapsed();
+    return;
+  }
+
+  // Collapse all: remember every branch as collapsed and hide each subtree.
+  if (evt.target.closest('#collapse-all')) {
+    document.querySelectorAll('#tree li.page.has-children').forEach(function (li) {
+      collapsed.add(li.dataset.key);
+      li.classList.add('collapsed');
+    });
+    saveCollapsed();
+    return;
+  }
+
   var toggle = evt.target.closest('.toggle');
   if (toggle) {
     var node = toggle.closest('li.page');
@@ -194,6 +242,7 @@ document.body.addEventListener('click', function (evt) {
         collapsed.add(key);
       }
       node.classList.toggle('collapsed', collapsed.has(key));
+      saveCollapsed();
     }
     return;
   }

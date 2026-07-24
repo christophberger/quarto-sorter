@@ -45,6 +45,10 @@
     <button type="submit">＋ Page</button>
   </form>
   <div id="tree" hx-get="/watch" hx-trigger="every 2s" hx-swap="innerHTML">{{template "tree" .Tree}}</div>
+  <div class="tree-toolbar">
+    <button type="button" id="expand-all" title="Expand all branches" aria-label="Expand all branches">⊞</button>
+    <button type="button" id="collapse-all" title="Collapse all branches" aria-label="Collapse all branches">⊟</button>
+  </div>
 </section>
 <div id="divider" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
 <section id="content-pane"><div id="content"><p class="empty">Select a page to view its content.</p></div></section>

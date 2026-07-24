@@ -189,6 +189,21 @@ button:hover {
   flex: 1;
 }
 
+/* Expand/collapse-all controls, pinned below the tree. */
+.tree-toolbar {
+  display: flex;
+  gap: 0.4rem;
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.tree-toolbar button {
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.2rem 0.5rem;
+}
+
 ul.children {
   list-style: none;
   /* The indentation lives in margin-left (not padding), so a left gutter
