@@ -32,7 +32,8 @@
   {{range .Profiles}}
   <label><input type="checkbox" name="profile" value="{{.}}"{{if index $.Selected .}} checked{{end}}> {{.}}</label>
   {{else}}<span class="empty">none</span>{{end}}
-  {{if .Profiles}}<button type="button" id="profiles-all" title="Select or deselect all profiles">All / none</button>{{end}}
+  {{if .Profiles}}<button type="button" id="profiles-all" title="Select or deselect all profiles">All / none</button>
+  <button type="button" id="profiles-update" title="Rewrite the chapter lists of all checked profiles from the current tree" hx-post="/update" hx-target="#tree" hx-swap="innerHTML">Update profiles</button>{{end}}
 </fieldset>{{end}}
 
 {{define "main"}}{{if .Tree}}

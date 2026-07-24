@@ -84,6 +84,7 @@ func newServer(prefsFile string) (*server, error) {
 	s.mux.HandleFunc("GET /{$}", s.page)
 	s.mux.HandleFunc("POST /open", s.open)
 	s.mux.HandleFunc("POST /profiles", s.setProfiles)
+	s.mux.HandleFunc("POST /update", s.update)
 	s.mux.HandleFunc("GET /tree", s.treeHandler)
 	s.mux.HandleFunc("GET /watch", s.watch)
 	s.mux.HandleFunc("POST /move", s.move)
@@ -370,6 +371,21 @@ func (s *server) apply(w http.ResponseWriter, op func(*project.Tree) error) {
 		return
 	}
 	s.renderTree(w, "")
+}
+
+// update rewrites the chapter lists of the currently selected profiles from
+// the tree as it stands, without changing anything else. It backs the
+// header's "Update profiles" button, letting the user sync profile configs
+// on demand rather than only as a side effect of a move, create, or delete
+// (for example after toggling which profiles are selected).
+func (s *server) update(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.root == "" {
+		http.Error(w, "no project open", http.StatusBadRequest)
+		return
+	}
+	s.apply(w, func(*project.Tree) error { return nil })
 }
 
 func (s *server) move(w http.ResponseWriter, r *http.Request) {

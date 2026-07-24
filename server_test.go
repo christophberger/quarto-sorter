@@ -223,6 +223,44 @@ func TestSavedSelectionIgnoresRemovedProfiles(t *testing.T) {
 	}
 }
 
+// The "Update profiles" button rewrites the chapter lists of the selected
+// profiles from the current tree, without needing a move/create/delete.
+func TestUpdateRewritesSelectedProfiles(t *testing.T) {
+	srv, root := testServer(t)
+	cfg := filepath.Join(root, "_quarto-chapter2.yml")
+
+	// A stale profile config that lacks the tree's chapters.
+	if err := os.WriteFile(cfg, []byte("book:\n  chapters:\n    - stale.qmd\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := post(t, srv, "/update", url.Values{})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: status %d: %s", rec.Code, rec.Body)
+	}
+	yml, _ := os.ReadFile(cfg)
+	if strings.Contains(string(yml), "stale.qmd") {
+		t.Errorf("update did not rewrite selected profile: %s", yml)
+	}
+	if !strings.Contains(string(yml), "- chapter2/second.qmd") {
+		t.Errorf("update missing tree chapters in profile: %s", yml)
+	}
+
+	// A deselected profile is left untouched by an update.
+	if rec := post(t, srv, "/profiles", url.Values{}); rec.Code != http.StatusNoContent {
+		t.Fatalf("profiles: status %d", rec.Code)
+	}
+	if err := os.WriteFile(cfg, []byte("book:\n  chapters:\n    - stale.qmd\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec := post(t, srv, "/update", url.Values{}); rec.Code != http.StatusOK {
+		t.Fatalf("update: status %d: %s", rec.Code, rec.Body)
+	}
+	yml, _ = os.ReadFile(cfg)
+	if !strings.Contains(string(yml), "stale.qmd") {
+		t.Errorf("update rewrote a deselected profile: %s", yml)
+	}
+}
+
 func TestContent(t *testing.T) {
 	srv, _ := testServer(t)
 	body := get(t, srv, "/content?path=chapter2/second.qmd").Body.String()

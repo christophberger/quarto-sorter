@@ -27,6 +27,7 @@ Then open http://localhost:8199 (change with `-addr`). Enter a project path in t
 - Drag a page by its ⠿ handle to reorder it — or drop it onto another chapter to move it there (files are moved on disk accordingly).
 - Click a page title to view the file in the right pane.
 - New pages are created as `name/index.qmd` (a section folder). The top-bar **＋ Page** form inserts the new page right after the page currently selected in the tree (or at the end of the root list if none is selected); a node's own ＋ button adds a child page under it. 🗑 moves a page to the system trash (falling back to a `_trash` directory inside the project).
+- Profile chapter lists are normally rewritten as a side effect of a move, create, or delete. The **Update profiles** button (next to **All / none** in the top bar) rewrites them from the current tree on demand — handy after changing which profiles are selected.
 - The tree and profile list refresh automatically when files change on disk outside the sorter (pages added, deleted, or edited, or profile configs added or removed).
 
 ## What a drop changes
