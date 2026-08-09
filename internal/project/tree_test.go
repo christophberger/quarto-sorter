@@ -134,29 +134,6 @@ func TestLoadSkipsUnderscoreAndHiddenDirs(t *testing.T) {
 	}
 }
 
-func TestChapters(t *testing.T) {
-	tree, err := Load(writeFixture(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{
-		"index.qmd",
-		"chapter1/index.qmd",
-		"chapter2/index.qmd",
-		"chapter2/second.qmd",
-		"chapter2/third.qmd",
-		"chapter2/fourth.qmd",
-		"chapter3.qmd",
-		"chapter3/another.qmd",
-		"chapter3/yet-another.qmd",
-		"chapter3/deep/index.qmd",
-		"chapter3/deep/leaf.qmd",
-	}
-	if got := tree.Chapters(); !reflect.DeepEqual(got, want) {
-		t.Errorf("Chapters() = %v, want %v", got, want)
-	}
-}
-
 // Profiles lists only profiles that configure a book; _quarto-web.yml has
 // no book key and stays hidden.
 func TestProfiles(t *testing.T) {

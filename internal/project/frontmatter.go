@@ -1,6 +1,6 @@
 // Package project loads a Quarto project, builds its page tree from the
 // order frontmatter, and applies structural edits (reorder, reparent,
-// create, delete) back to the files and profile configs.
+// create, delete) back to the files.
 package project
 
 import (

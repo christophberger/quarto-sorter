@@ -227,26 +227,8 @@ func find(pages []*Page, p string) *Page {
 	return nil
 }
 
-// Chapters returns all page paths in depth-first display order, the form
-// Quarto book chapter lists use.
-func (t *Tree) Chapters() []string {
-	var out []string
-	var walk func([]*Page)
-	walk = func(pages []*Page) {
-		for _, p := range pages {
-			if p.Path != "" {
-				out = append(out, p.Path)
-			}
-			walk(p.Children)
-		}
-	}
-	walk(t.Pages)
-	return out
-}
-
 // Profiles returns the profile names of the _quarto-<name>.yml files in
-// root that configure a book (contain a top-level book key). Only these
-// profiles maintain a chapter list.
+// root that configure a book (contain a top-level book key).
 func Profiles(root string) ([]string, error) {
 	matches, err := filepath.Glob(filepath.Join(root, "_quarto-*.yml"))
 	if err != nil {

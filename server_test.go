@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -46,7 +45,7 @@ func fixture(t *testing.T) string {
 func testServer(t *testing.T) (http.Handler, string) {
 	t.Helper()
 	root := fixture(t)
-	srv, err := newServer("")
+	srv, err := newServer()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,14 +79,10 @@ func TestOpenRendersTree(t *testing.T) {
 		`data-path="chapter2/second.qmd"`,
 		`data-parent="chapter2/index.qmd"`,
 		"Second",
-		`value="chapter2"`, // profile checkbox
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page missing %q", want)
 		}
-	}
-	if strings.Contains(body, `value="web"`) {
-		t.Errorf("profile without book key rendered as checkbox:\n%s", body)
 	}
 	if !strings.Contains(body, `unordered" data-path="chapter2/loose.qmd"`) {
 		t.Errorf("loose.qmd not marked unordered:\n%s", body)
@@ -100,8 +95,11 @@ func TestOpenRendersTree(t *testing.T) {
 	}
 }
 
-func TestMoveUpdatesFilesAndYaml(t *testing.T) {
+// A move reorders the tree on disk and leaves every _quarto*.yml config
+// alone: chapter lists are no longer maintained by the sorter.
+func TestMoveReordersAndLeavesConfigsAlone(t *testing.T) {
 	srv, root := testServer(t)
+	before := configs(t, root)
 	rec := post(t, srv, "/move", url.Values{
 		"src": {"chapter2/third.qmd"}, "parent": {"chapter2/index.qmd"}, "pos": {"0"},
 	})
@@ -112,152 +110,33 @@ func TestMoveUpdatesFilesAndYaml(t *testing.T) {
 	if strings.Index(body, "chapter2/third.qmd") > strings.Index(body, "chapter2/second.qmd") {
 		t.Errorf("third not before second:\n%s", body)
 	}
-	for _, cfg := range []string{"_quarto.yml", "_quarto-chapter2.yml"} {
-		yml, _ := os.ReadFile(filepath.Join(root, cfg))
-		s := string(yml)
-		if !strings.Contains(s, "- chapter2/third.qmd") {
-			t.Errorf("%s missing chapters: %s", cfg, s)
-		}
-		if strings.Index(s, "- chapter2/third.qmd") > strings.Index(s, "- chapter2/second.qmd") {
-			t.Errorf("%s chapter order wrong: %s", cfg, s)
-		}
-	}
+	assertConfigsUnchanged(t, root, before)
 }
 
-func TestProfileSelectionLimitsYamlWrites(t *testing.T) {
-	srv, root := testServer(t)
-	// Deselect all profiles, then move: only _quarto.yml gets rewritten.
-	if rec := post(t, srv, "/profiles", url.Values{}); rec.Code != http.StatusNoContent {
-		t.Fatalf("profiles: status %d", rec.Code)
-	}
-	post(t, srv, "/move", url.Values{
-		"src": {"chapter2/third.qmd"}, "parent": {"chapter2/index.qmd"}, "pos": {"0"},
-	})
-	yml, _ := os.ReadFile(filepath.Join(root, "_quarto-chapter2.yml"))
-	if strings.Contains(string(yml), "third.qmd") {
-		t.Errorf("_quarto-chapter2.yml written although deselected: %s", yml)
-	}
-}
-
-// checkboxChecked reports whether the profile checkbox for name is rendered
-// checked in the page HTML.
-func checkboxChecked(t *testing.T, h http.Handler, name string) bool {
+// configs snapshots the contents of the project's _quarto*.yml files.
+func configs(t *testing.T, root string) map[string]string {
 	t.Helper()
-	body := get(t, h, "/").Body.String()
-	attr := `value="` + name + `"`
-	if !strings.Contains(body, attr) {
-		t.Fatalf("page missing profile checkbox %q:\n%s", name, body)
+	matches, err := filepath.Glob(filepath.Join(root, "_quarto*.yml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return strings.Contains(body, attr+" checked")
+	out := map[string]string{}
+	for _, m := range matches {
+		b, err := os.ReadFile(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[filepath.Base(m)] = string(b)
+	}
+	return out
 }
 
-func TestProfileSelectionPersistsPerProject(t *testing.T) {
-	root := fixture(t)
-	prefs := filepath.Join(t.TempDir(), "profiles.json")
-
-	srv, err := newServer(prefs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	post(t, srv, "/open", url.Values{"path": {root}})
-	if !checkboxChecked(t, srv, "chapter2") {
-		t.Fatal("profile not selected by default")
-	}
-	// Deselect all profiles; the empty selection must be saved for root.
-	if rec := post(t, srv, "/profiles", url.Values{}); rec.Code != http.StatusNoContent {
-		t.Fatalf("profiles: status %d", rec.Code)
-	}
-
-	// Switching to another project and back restores the saved selection.
-	other := fixture(t)
-	post(t, srv, "/open", url.Values{"path": {other}})
-	if !checkboxChecked(t, srv, "chapter2") {
-		t.Error("fresh project should default to all profiles selected")
-	}
-	post(t, srv, "/open", url.Values{"path": {root}})
-	if checkboxChecked(t, srv, "chapter2") {
-		t.Error("deselection not restored after switching projects")
-	}
-
-	// A new server reading the same prefs file (a restart) restores it too.
-	srv2, err := newServer(prefs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	post(t, srv2, "/open", url.Values{"path": {root}})
-	if checkboxChecked(t, srv2, "chapter2") {
-		t.Error("deselection not restored after restart")
-	}
-	post(t, srv2, "/profiles", url.Values{"profile": {"chapter2"}})
-	post(t, srv2, "/open", url.Values{"path": {other}})
-	post(t, srv2, "/open", url.Values{"path": {root}})
-	if !checkboxChecked(t, srv2, "chapter2") {
-		t.Error("reselection not restored after switching projects")
-	}
-}
-
-func TestSavedSelectionIgnoresRemovedProfiles(t *testing.T) {
-	root := fixture(t)
-	prefs := filepath.Join(t.TempDir(), "profiles.json")
-	// A saved selection may reference a profile whose config was deleted
-	// since; it must neither show up nor break the restore.
-	b, err := json.Marshal(map[string][]string{root: {"chapter2", "gone"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prefs, b, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	srv, err := newServer(prefs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	post(t, srv, "/open", url.Values{"path": {root}})
-	body := get(t, srv, "/").Body.String()
-	if strings.Contains(body, `value="gone"`) {
-		t.Errorf("nonexistent profile rendered:\n%s", body)
-	}
-	if !checkboxChecked(t, srv, "chapter2") {
-		t.Error("existing profile not restored")
-	}
-}
-
-// The "Update profiles" button rewrites the chapter lists of the selected
-// profiles from the current tree, without needing a move/create/delete.
-func TestUpdateRewritesSelectedProfiles(t *testing.T) {
-	srv, root := testServer(t)
-	cfg := filepath.Join(root, "_quarto-chapter2.yml")
-
-	// A stale profile config that lacks the tree's chapters.
-	if err := os.WriteFile(cfg, []byte("book:\n  chapters:\n    - stale.qmd\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	rec := post(t, srv, "/update", url.Values{})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("update: status %d: %s", rec.Code, rec.Body)
-	}
-	yml, _ := os.ReadFile(cfg)
-	if strings.Contains(string(yml), "stale.qmd") {
-		t.Errorf("update did not rewrite selected profile: %s", yml)
-	}
-	if !strings.Contains(string(yml), "- chapter2/second.qmd") {
-		t.Errorf("update missing tree chapters in profile: %s", yml)
-	}
-
-	// A deselected profile is left untouched by an update.
-	if rec := post(t, srv, "/profiles", url.Values{}); rec.Code != http.StatusNoContent {
-		t.Fatalf("profiles: status %d", rec.Code)
-	}
-	if err := os.WriteFile(cfg, []byte("book:\n  chapters:\n    - stale.qmd\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if rec := post(t, srv, "/update", url.Values{}); rec.Code != http.StatusOK {
-		t.Fatalf("update: status %d: %s", rec.Code, rec.Body)
-	}
-	yml, _ = os.ReadFile(cfg)
-	if !strings.Contains(string(yml), "stale.qmd") {
-		t.Errorf("update rewrote a deselected profile: %s", yml)
+func assertConfigsUnchanged(t *testing.T, root string, before map[string]string) {
+	t.Helper()
+	for name, want := range configs(t, root) {
+		if got := before[name]; got != want {
+			t.Errorf("%s was rewritten:\nbefore: %s\nafter:  %s", name, got, want)
+		}
 	}
 }
 
@@ -327,6 +206,7 @@ func TestSave(t *testing.T) {
 
 func TestCreateAndDelete(t *testing.T) {
 	srv, root := testServer(t)
+	before := configs(t, root)
 	rec := post(t, srv, "/create", url.Values{
 		"parent": {""}, "name": {"about"}, "title": {"About"},
 	})
@@ -337,10 +217,7 @@ func TestCreateAndDelete(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `data-path="about/index.qmd"`) {
 		t.Errorf("tree missing created page:\n%s", rec.Body)
 	}
-	yml, _ := os.ReadFile(filepath.Join(root, "_quarto.yml"))
-	if !strings.Contains(string(yml), "- about/index.qmd") {
-		t.Errorf("_quarto.yml missing created page: %s", yml)
-	}
+	assertConfigsUnchanged(t, root, before)
 
 	rec = post(t, srv, "/delete", url.Values{"path": {"about/index.qmd"}})
 	if rec.Code != http.StatusOK {
@@ -352,12 +229,13 @@ func TestCreateAndDelete(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "about")); !os.IsNotExist(err) {
 		t.Error("about/ still on disk")
 	}
+	assertConfigsUnchanged(t, root, before)
 }
 
 // The top-bar create form sends the selected page as "after"; the new page
 // lands right behind it in the same group.
 func TestCreateAfter(t *testing.T) {
-	srv, root := testServer(t)
+	srv, _ := testServer(t)
 	rec := post(t, srv, "/create", url.Values{
 		"parent": {""}, "after": {"chapter2/second.qmd"},
 		"name": {"inserted"}, "title": {"Inserted"},
@@ -375,10 +253,6 @@ func TestCreateAfter(t *testing.T) {
 	iThird := strings.Index(body, `data-path="chapter2/third.qmd"`)
 	if !(iSecond < iNew && iNew < iThird) {
 		t.Errorf("inserted page not between second and third:\n%s", body)
-	}
-	yml, _ := os.ReadFile(filepath.Join(root, "_quarto.yml"))
-	if !strings.Contains(string(yml), "- chapter2/inserted/index.qmd") {
-		t.Errorf("_quarto.yml missing inserted page: %s", yml)
 	}
 }
 
@@ -407,35 +281,8 @@ func TestWatchDetectsExternalChanges(t *testing.T) {
 	}
 }
 
-// Dropping a book profile config on disk makes its checkbox appear via
-// /watch, refreshed out of band alongside the tree.
-func TestWatchRefreshesProfiles(t *testing.T) {
-	srv, root := testServer(t)
-	if strings.Contains(get(t, srv, "/").Body.String(), `value="extra"`) {
-		t.Fatal("extra profile present before it exists")
-	}
-	cfg := "book:\n  chapters:\n    - index.qmd\n"
-	if err := os.WriteFile(filepath.Join(root, "_quarto-extra.yml"), []byte(cfg), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	rec := get(t, srv, "/watch")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("watch: status %d, want 200", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), `hx-swap-oob="innerHTML:#profiles-form"`) {
-		t.Errorf("watch missing profile OOB refresh:\n%s", rec.Body)
-	}
-	if !strings.Contains(rec.Body.String(), `value="extra"`) {
-		t.Errorf("watch missing new profile checkbox:\n%s", rec.Body)
-	}
-	// A freshly appearing profile defaults to selected (select-all default).
-	if !checkboxChecked(t, srv, "extra") {
-		t.Error("new profile not selected by default")
-	}
-}
-
 func TestOpenBadPath(t *testing.T) {
-	srv, err := newServer("")
+	srv, err := newServer()
 	if err != nil {
 		t.Fatal(err)
 	}

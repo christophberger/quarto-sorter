@@ -196,21 +196,6 @@ document.body.addEventListener('htmx:oobAfterSwap', function (evt) {
 });
 
 document.body.addEventListener('click', function (evt) {
-  // "All / none": check every profile box, or uncheck all if all are checked,
-  // then fire the change event htmx listens for so the selection is saved.
-  if (evt.target.closest('#profiles-all')) {
-    var boxes = Array.prototype.slice.call(
-      document.querySelectorAll('#profiles input[name="profile"]')
-    );
-    var allChecked = boxes.every(function (b) { return b.checked; });
-    boxes.forEach(function (b) { b.checked = !allChecked; });
-    var form = document.getElementById('profiles-form');
-    if (form) {
-      form.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-    return;
-  }
-
   // Expand all: forget every collapsed branch and reveal each subtree.
   if (evt.target.closest('#expand-all')) {
     collapsed.clear();

@@ -2,7 +2,6 @@ package main
 
 import (
 	"embed"
-	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"html/template"
@@ -11,7 +10,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,38 +20,21 @@ import (
 //go:embed web
 var web embed.FS
 
-// server holds the currently open project and the profile selection.
-// A mutex serializes all access: this is a single-user local tool.
+// server holds the currently open project. A mutex serializes all access:
+// this is a single-user local tool.
 type server struct {
 	mux  *http.ServeMux
 	tmpl *template.Template
 
-	mu       sync.Mutex
-	root     string
-	profiles []string
-	selected map[string]bool
+	mu   sync.Mutex
+	root string
 
 	// fp is the on-disk fingerprint of the project state that was last
 	// rendered; /watch re-renders only when the disk no longer matches.
 	fp string
-
-	// prefsFile persists the profile selection per project root across
-	// restarts; empty disables persistence. saved holds its content.
-	prefsFile string
-	saved     map[string][]string
 }
 
-// defaultPrefsFile returns the profile selections file in the user's config
-// directory, or "" if no config directory is available.
-func defaultPrefsFile() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(dir, "quarto-sorter", "profiles.json")
-}
-
-func newServer(prefsFile string) (*server, error) {
+func newServer() (*server, error) {
 	funcs := template.FuncMap{
 		"group": func(parent string, pages []*project.Page) any {
 			return struct {
@@ -66,16 +47,7 @@ func newServer(prefsFile string) (*server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &server{
-		mux: http.NewServeMux(), tmpl: tmpl, selected: map[string]bool{},
-		prefsFile: prefsFile, saved: map[string][]string{},
-	}
-	if prefsFile != "" {
-		// A missing or unreadable file just means no saved selections yet.
-		if b, err := os.ReadFile(prefsFile); err == nil {
-			json.Unmarshal(b, &s.saved)
-		}
-	}
+	s := &server{mux: http.NewServeMux(), tmpl: tmpl}
 	static, err := iofs.Sub(web, "web/static")
 	if err != nil {
 		return nil, err
@@ -83,8 +55,6 @@ func newServer(prefsFile string) (*server, error) {
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
 	s.mux.HandleFunc("GET /{$}", s.page)
 	s.mux.HandleFunc("POST /open", s.open)
-	s.mux.HandleFunc("POST /profiles", s.setProfiles)
-	s.mux.HandleFunc("POST /update", s.update)
 	s.mux.HandleFunc("GET /tree", s.treeHandler)
 	s.mux.HandleFunc("GET /watch", s.watch)
 	s.mux.HandleFunc("POST /move", s.move)
@@ -101,16 +71,14 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // state bundles everything the page templates need.
 type state struct {
-	Root     string
-	Profiles []string
-	Selected map[string]bool
-	Tree     *project.Tree
-	Error    string
+	Root  string
+	Tree  *project.Tree
+	Error string
 }
 
 // load builds the current template state; the caller must hold s.mu.
 func (s *server) load() (state, error) {
-	st := state{Root: s.root, Profiles: s.profiles, Selected: s.selected}
+	st := state{Root: s.root}
 	if s.root == "" {
 		return st, nil
 	}
@@ -125,9 +93,9 @@ func (s *server) render(w http.ResponseWriter, name string, data any) {
 	}
 }
 
-// fingerprint hashes everything the tree pane and profile row are
-// rendered from: the paths, sizes, and mtimes of the project's .qmd files
-// and _quarto*.yml configs. Equal fingerprints mean no refresh is needed.
+// fingerprint hashes everything the tree pane is rendered from: the paths,
+// sizes, and mtimes of the project's .qmd files and _quarto*.yml configs.
+// Equal fingerprints mean no refresh is needed.
 func fingerprint(root string) string {
 	h := fnv.New64a()
 	filepath.WalkDir(root, func(p string, d iofs.DirEntry, err error) error {
@@ -164,37 +132,9 @@ func (s *server) rememberFP() {
 	}
 }
 
-// refreshProfiles rescans the project's book profiles, keeping the
-// selection of profiles it already knows. A newly appearing profile is
-// selected if it is part of the project's saved selection, or if the user
-// never customized the selection (matching the select-all default).
-// It reports whether the profile row changed. The caller must hold s.mu.
-func (s *server) refreshProfiles() bool {
-	if s.root == "" {
-		return false
-	}
-	profiles, err := project.Profiles(s.root)
-	if err != nil {
-		return false
-	}
-	saved, customized := s.saved[s.root]
-	selected := map[string]bool{}
-	for _, p := range profiles {
-		if slices.Contains(s.profiles, p) {
-			selected[p] = s.selected[p]
-		} else {
-			selected[p] = !customized || slices.Contains(saved, p)
-		}
-	}
-	changed := !slices.Equal(profiles, s.profiles)
-	s.profiles, s.selected = profiles, selected
-	return changed
-}
-
 func (s *server) page(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.refreshProfiles()
 	s.rememberFP()
 	st, err := s.load()
 	if err != nil {
@@ -206,18 +146,7 @@ func (s *server) page(w http.ResponseWriter, r *http.Request) {
 func (s *server) open(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	root, err := filepath.Abs(strings.TrimSpace(r.FormValue("path")))
-	if err == nil {
-		var fi os.FileInfo
-		if fi, err = os.Stat(root); err == nil && !fi.IsDir() {
-			err = fmt.Errorf("%s is not a directory", root)
-		}
-	}
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := s.setRoot(root); err != nil {
+	if err := s.setRoot(strings.TrimSpace(r.FormValue("path"))); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -228,78 +157,24 @@ func (s *server) open(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "main", st)
-	s.renderProfilesOOB(w, st)
 }
 
-// renderProfilesOOB appends an out-of-band refresh of the profile
-// checkbox row in the header. The caller must hold s.mu.
-func (s *server) renderProfilesOOB(w http.ResponseWriter, st state) {
-	fmt.Fprint(w, `<div hx-swap-oob="innerHTML:#profiles-form">`)
-	s.render(w, "profiles", st)
-	fmt.Fprint(w, `</div>`)
-}
-
-// setRoot switches to the project at root, restoring the saved profile
-// selection for that project, or selecting all profiles if none was saved.
-// The caller must hold s.mu (or not be serving yet).
-func (s *server) setRoot(root string) error {
-	profiles, err := project.Profiles(root)
+// setRoot switches to the project at dir, which must name an existing
+// directory. The caller must hold s.mu (or not be serving yet).
+func (s *server) setRoot(dir string) error {
+	root, err := filepath.Abs(dir)
 	if err != nil {
 		return err
 	}
-	s.root, s.profiles, s.selected = root, profiles, map[string]bool{}
-	if saved, ok := s.saved[root]; ok {
-		// Restore the saved selection, dropping profiles that no longer exist.
-		for _, p := range saved {
-			if slices.Contains(profiles, p) {
-				s.selected[p] = true
-			}
-		}
-		return nil
-	}
-	for _, p := range profiles {
-		s.selected[p] = true // default: keep all profiles in sync
-	}
-	return nil
-}
-
-func (s *server) setProfiles(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	r.ParseForm()
-	s.selected = map[string]bool{}
-	for _, p := range r.Form["profile"] {
-		s.selected[p] = true
-	}
-	if s.root != "" {
-		sel := []string{} // non-nil: an empty selection is a valid saved state
-		for _, p := range s.profiles {
-			if s.selected[p] {
-				sel = append(sel, p)
-			}
-		}
-		s.saved[s.root] = sel
-		s.savePrefs()
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// savePrefs writes the per-project profile selections to the prefs file.
-// Persistence is best effort: the in-memory state is already updated, so a
-// write failure only loses the selection across restarts. The caller must
-// hold s.mu.
-func (s *server) savePrefs() {
-	if s.prefsFile == "" {
-		return
-	}
-	b, err := json.MarshalIndent(s.saved, "", "  ")
+	fi, err := os.Stat(root)
 	if err != nil {
-		return
+		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.prefsFile), 0o755); err != nil {
-		return
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory", root)
 	}
-	os.WriteFile(s.prefsFile, b, 0o644)
+	s.root = root
+	return nil
 }
 
 func (s *server) treeHandler(w http.ResponseWriter, r *http.Request) {
@@ -309,11 +184,8 @@ func (s *server) treeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // renderTree renders the tree fragment, prefixed with an error banner if
-// msg is non-empty. If the set of book profiles changed on disk, the
-// profile row in the header is refreshed out of band along with the tree.
-// The caller must hold s.mu.
+// msg is non-empty. The caller must hold s.mu.
 func (s *server) renderTree(w http.ResponseWriter, msg string) {
-	profilesChanged := s.refreshProfiles()
 	s.rememberFP()
 	st, err := s.load()
 	if err != nil {
@@ -326,14 +198,11 @@ func (s *server) renderTree(w http.ResponseWriter, msg string) {
 	}
 	st.Error = msg
 	s.render(w, "treewrap", st)
-	if profilesChanged {
-		s.renderProfilesOOB(w, st)
-	}
 }
 
-// watch is polled by the client. It re-renders the tree (and, when
-// needed, the profile row) only when the project changed on disk outside
-// the sorter; 204 tells htmx to leave the page alone.
+// watch is polled by the client. It re-renders the tree only when the
+// project changed on disk outside the sorter; 204 tells htmx to leave the
+// page alone.
 func (s *server) watch(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -344,9 +213,8 @@ func (s *server) watch(w http.ResponseWriter, r *http.Request) {
 	s.renderTree(w, "")
 }
 
-// apply runs op on a freshly loaded tree, syncs the chapter lists of the
-// selected profiles, and responds with the updated tree. Errors from op
-// appear as a banner above the (reverted) tree.
+// apply runs op on a freshly loaded tree and responds with the updated
+// tree. Errors from op appear as a banner above the (reverted) tree.
 func (s *server) apply(w http.ResponseWriter, op func(*project.Tree) error) {
 	tree, err := project.Load(s.root)
 	if err != nil {
@@ -357,35 +225,7 @@ func (s *server) apply(w http.ResponseWriter, op func(*project.Tree) error) {
 		s.renderTree(w, err.Error())
 		return
 	}
-	if tree, err = project.Load(s.root); err == nil {
-		var selected []string
-		for p, on := range s.selected {
-			if on {
-				selected = append(selected, p)
-			}
-		}
-		err = tree.WriteChapters(selected)
-	}
-	if err != nil {
-		s.renderTree(w, err.Error())
-		return
-	}
 	s.renderTree(w, "")
-}
-
-// update rewrites the chapter lists of the currently selected profiles from
-// the tree as it stands, without changing anything else. It backs the
-// header's "Update profiles" button, letting the user sync profile configs
-// on demand rather than only as a side effect of a move, create, or delete
-// (for example after toggling which profiles are selected).
-func (s *server) update(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.root == "" {
-		http.Error(w, "no project open", http.StatusBadRequest)
-		return
-	}
-	s.apply(w, func(*project.Tree) error { return nil })
 }
 
 func (s *server) move(w http.ResponseWriter, r *http.Request) {
@@ -508,14 +348,10 @@ func (s *server) save(w http.ResponseWriter, r *http.Request) {
 // renderTreeOOB appends an out-of-band refresh of the tree pane to the
 // response. The caller must hold s.mu.
 func (s *server) renderTreeOOB(w http.ResponseWriter) {
-	profilesChanged := s.refreshProfiles()
 	s.rememberFP()
 	if st, err := s.load(); err == nil && st.Tree != nil {
 		fmt.Fprint(w, `<div hx-swap-oob="innerHTML:#tree">`)
 		s.render(w, "treewrap", st)
 		fmt.Fprint(w, `</div>`)
-		if profilesChanged {
-			s.renderProfilesOOB(w, st)
-		}
 	}
 }

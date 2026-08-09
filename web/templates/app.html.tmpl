@@ -17,24 +17,12 @@
       <input name="path" placeholder="/path/to/quarto/project" value="{{.Root}}">
       <button type="submit">Open</button>
     </form>
-    <form id="profiles-form" hx-post="/profiles" hx-trigger="change" hx-swap="none">
-      {{template "profiles" .}}
-    </form>
   </header>
   <main class="panes" id="main">
     {{template "main" .}}
   </main>
 </body>
 </html>{{end}}
-
-{{define "profiles"}}<fieldset class="profiles" id="profiles">
-  <legend>Profiles</legend>
-  {{range .Profiles}}
-  <label><input type="checkbox" name="profile" value="{{.}}"{{if index $.Selected .}} checked{{end}}> {{.}}</label>
-  {{else}}<span class="empty">none</span>{{end}}
-  {{if .Profiles}}<button type="button" id="profiles-all" title="Select or deselect all profiles">All / none</button>
-  <button type="button" id="profiles-update" title="Rewrite the chapter lists of all checked profiles from the current tree" hx-post="/update" hx-target="#tree" hx-swap="innerHTML">Update profiles</button>{{end}}
-</fieldset>{{end}}
 
 {{define "main"}}{{if .Tree}}
 <section id="tree-pane">
