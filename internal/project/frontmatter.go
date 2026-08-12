@@ -1,6 +1,6 @@
 // Package project loads a Quarto project, builds its page tree from the
 // order frontmatter, and applies structural edits (reorder, reparent,
-// create, delete) back to the files and profile configs.
+// create, delete) back to the files.
 package project
 
 import (
@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // FrontMatter holds the frontmatter fields the sorter cares about.

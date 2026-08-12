@@ -17,9 +17,7 @@
       <input name="path" placeholder="/path/to/quarto/project" value="{{.Root}}">
       <button type="submit">Open</button>
     </form>
-    <form id="profiles-form" hx-post="/profiles" hx-trigger="change" hx-swap="none">
-      {{template "profiles" .}}
-    </form>
+    <div id="render-panel">{{template "render" .}}</div>
   </header>
   <main class="panes" id="main">
     {{template "main" .}}
@@ -27,14 +25,36 @@
 </body>
 </html>{{end}}
 
-{{define "profiles"}}<fieldset class="profiles" id="profiles">
-  <legend>Profiles</legend>
-  {{range .Profiles}}
-  <label><input type="checkbox" name="profile" value="{{.}}"{{if index $.Selected .}} checked{{end}}> {{.}}</label>
-  {{else}}<span class="empty">none</span>{{end}}
-  {{if .Profiles}}<button type="button" id="profiles-all" title="Select or deselect all profiles">All / none</button>
-  <button type="button" id="profiles-update" title="Rewrite the chapter lists of all checked profiles from the current tree" hx-post="/update" hx-target="#tree" hx-swap="innerHTML">Update profiles</button>{{end}}
-</fieldset>{{end}}
+{{define "render"}}{{with .Render}}{{if .Books}}<details class="render">
+  <summary title="Build each selected book into one flat document and render it">Render</summary>
+  <div class="render-body">
+    <form id="render-form" hx-post="/render/select" hx-trigger="change" hx-swap="none">
+      {{range $book := .Books}}
+      <fieldset class="book">
+        <legend><label><input type="checkbox" name="book" value="{{$book.Name}}"{{if $book.Selected}} checked{{end}}> {{$book.Name}}</label></legend>
+        {{range $book.Profiles}}<label class="profile" title="One quarto render run per checked profile"><input type="checkbox" name="profile.{{$book.Name}}" value="{{.Name}}"{{if .Selected}} checked{{end}}> {{.Name}}</label>
+        {{else}}<span class="empty">no book profiles</span>{{end}}
+      </fieldset>
+      {{end}}
+      <fieldset class="formats">
+        <legend>Formats</legend>
+        {{range .Formats}}<label><input type="checkbox" name="format" value="{{.Name}}"{{if .Selected}} checked{{end}}> {{.Name}}</label>
+        {{end}}
+        <label title="Also render the deck built from the pages' ::: slide blocks"><input type="checkbox" name="slides" value="1"{{if .Slides}} checked{{end}}> slides</label>
+      </fieldset>
+      <button type="button" id="render-run" hx-post="/render" hx-target="#render-log" hx-swap="innerHTML">Render</button>
+    </form>
+    <div id="render-log"></div>
+  </div>
+</details>{{end}}{{end}}{{end}}
+
+{{define "render-log"}}<div{{if .Running}} hx-get="/render/status" hx-trigger="every 1s" hx-target="#render-log" hx-swap="innerHTML"{{end}}>
+  {{if .Lines}}<pre class="render-output">{{range .Lines}}{{.}}
+{{end}}</pre>{{end}}
+  {{if .Running}}<span class="render-status running">Rendering…</span>
+  {{else if .Failed}}<span class="render-status failed">Render failed</span>
+  {{else if .Lines}}<span class="render-status ok">Done</span>{{end}}
+</div>{{end}}
 
 {{define "main"}}{{if .Tree}}
 <section id="tree-pane">
