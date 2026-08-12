@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,9 +33,18 @@ type server struct {
 	// fp is the on-disk fingerprint of the project state that was last
 	// rendered; /watch re-renders only when the disk no longer matches.
 	fp string
+
+	// prefsFile persists the render selection per project root across
+	// restarts; empty disables persistence. prefs holds its content.
+	prefsFile string
+	prefs     map[string]renderPrefs
+
+	// job is the background render. It has its own lock: a render takes
+	// minutes and must not block the tree handlers.
+	job job
 }
 
-func newServer() (*server, error) {
+func newServer(prefsFile string) (*server, error) {
 	funcs := template.FuncMap{
 		"group": func(parent string, pages []*project.Page) any {
 			return struct {
@@ -47,7 +57,8 @@ func newServer() (*server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &server{mux: http.NewServeMux(), tmpl: tmpl}
+	s := &server{mux: http.NewServeMux(), tmpl: tmpl, prefsFile: prefsFile}
+	s.loadPrefs()
 	static, err := iofs.Sub(web, "web/static")
 	if err != nil {
 		return nil, err
@@ -62,6 +73,9 @@ func newServer() (*server, error) {
 	s.mux.HandleFunc("POST /delete", s.delete)
 	s.mux.HandleFunc("GET /content", s.content)
 	s.mux.HandleFunc("POST /save", s.save)
+	s.mux.HandleFunc("POST /render", s.startRender)
+	s.mux.HandleFunc("POST /render/select", s.selectRender)
+	s.mux.HandleFunc("GET /render/status", s.renderStatus)
 	return s, nil
 }
 
@@ -71,9 +85,31 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // state bundles everything the page templates need.
 type state struct {
-	Root  string
-	Tree  *project.Tree
-	Error string
+	Root   string
+	Tree   *project.Tree
+	Render renderView
+	Error  string
+}
+
+// renderView is what the render panel shows: the project's book folders
+// with the profiles and formats currently selected for them.
+type renderView struct {
+	Books   []bookView
+	Formats []checkbox
+	Slides  bool
+}
+
+// bookView is one book folder in the render panel.
+type bookView struct {
+	Name     string
+	Selected bool
+	Profiles []checkbox
+}
+
+// checkbox is a named on/off choice in the render panel.
+type checkbox struct {
+	Name     string
+	Selected bool
 }
 
 // load builds the current template state; the caller must hold s.mu.
@@ -82,9 +118,35 @@ func (s *server) load() (state, error) {
 	if s.root == "" {
 		return st, nil
 	}
+	st.Render = s.renderView()
 	tree, err := project.Load(s.root)
 	st.Tree = tree
 	return st, err
+}
+
+// renderView assembles the render panel from the project's book folders and
+// book profiles, marked up with the saved selection. The caller must hold
+// s.mu.
+func (s *server) renderView() renderView {
+	prefs := s.prefsFor(s.root)
+	available, err := project.Profiles(s.root)
+	if err != nil {
+		available = nil
+	}
+
+	v := renderView{Slides: prefs.Slides}
+	for _, name := range books(s.root) {
+		b := bookView{Name: name, Selected: slices.Contains(prefs.Books, name)}
+		on := prefs.profilesFor(name, available)
+		for _, p := range available {
+			b.Profiles = append(b.Profiles, checkbox{p, slices.Contains(on, p)})
+		}
+		v.Books = append(v.Books, b)
+	}
+	for _, f := range renderFormats {
+		v.Formats = append(v.Formats, checkbox{f, slices.Contains(prefs.Formats, f)})
+	}
+	return v
 }
 
 func (s *server) render(w http.ResponseWriter, name string, data any) {
@@ -157,6 +219,10 @@ func (s *server) open(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "main", st)
+	// The panel lives in the header, which the #main swap does not reach.
+	fmt.Fprint(w, `<div hx-swap-oob="innerHTML:#render-panel">`)
+	s.render(w, "render", st)
+	fmt.Fprint(w, `</div>`)
 }
 
 // setRoot switches to the project at dir, which must name an existing
@@ -343,6 +409,90 @@ func (s *server) save(w http.ResponseWriter, r *http.Request) {
 	}
 	// Our own write must not look like an outside change to /watch.
 	s.rememberFP()
+}
+
+// formValues reads the render panel's form into a selection. The profile
+// boxes of a book are named "profile.<book>" so that each book keeps its
+// own set.
+func formValues(form map[string][]string, root string) renderPrefs {
+	p := renderPrefs{
+		Books:    form["book"],
+		Formats:  form["format"],
+		Profiles: map[string][]string{},
+		Slides:   len(form["slides"]) > 0,
+	}
+	for _, b := range books(root) {
+		if sel := form["profile."+b]; len(sel) > 0 {
+			p.Profiles[b] = sel
+		} else {
+			// An empty entry is a real choice — "render this book with no
+			// profile" — and must not fall back to the name-matched default.
+			p.Profiles[b] = []string{}
+		}
+	}
+	return p
+}
+
+// selectRender remembers the render selection without starting anything.
+// The panel posts here on every change, so the choice survives a restart
+// even if the user never presses Render.
+func (s *server) selectRender(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.root == "" {
+		http.Error(w, "no project open", http.StatusBadRequest)
+		return
+	}
+	r.ParseForm()
+	s.prefs[s.root] = formValues(r.Form, s.root)
+	s.savePrefs()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// startRender saves the selection and kicks off the background render,
+// answering with the log panel that polls /render/status for progress.
+func (s *server) startRender(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.root == "" {
+		http.Error(w, "no project open", http.StatusBadRequest)
+		return
+	}
+	r.ParseForm()
+	prefs := formValues(r.Form, s.root)
+	s.prefs[s.root] = prefs
+	s.savePrefs()
+
+	switch {
+	case len(prefs.Books) == 0:
+		s.renderLog(w, jobState{Lines: []string{"select at least one book to render"}, Failed: true})
+		return
+	case len(prefs.Formats) == 0 && !prefs.Slides:
+		s.renderLog(w, jobState{Lines: []string{"select at least one output format"}, Failed: true})
+		return
+	}
+
+	opts := renderOpts{
+		Root:     s.root,
+		Books:    prefs.Books,
+		Profiles: prefs.Profiles,
+		Formats:  prefs.Formats,
+		Slides:   prefs.Slides,
+	}
+	if !s.job.start(opts) {
+		s.renderLog(w, s.job.state())
+		return
+	}
+	s.renderLog(w, s.job.state())
+}
+
+// renderStatus is polled by the log panel while a render runs.
+func (s *server) renderStatus(w http.ResponseWriter, r *http.Request) {
+	s.renderLog(w, s.job.state())
+}
+
+func (s *server) renderLog(w http.ResponseWriter, st jobState) {
+	s.render(w, "render-log", st)
 }
 
 // renderTreeOOB appends an out-of-band refresh of the tree pane to the

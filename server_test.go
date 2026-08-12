@@ -42,10 +42,10 @@ func fixture(t *testing.T) string {
 	return root
 }
 
-func testServer(t *testing.T) (http.Handler, string) {
+func testServer(t *testing.T) (*server, string) {
 	t.Helper()
 	root := fixture(t)
-	srv, err := newServer()
+	srv, err := newServer("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestWatchDetectsExternalChanges(t *testing.T) {
 }
 
 func TestOpenBadPath(t *testing.T) {
-	srv, err := newServer()
+	srv, err := newServer("")
 	if err != nil {
 		t.Fatal(err)
 	}

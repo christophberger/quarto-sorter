@@ -1,6 +1,6 @@
 # Quarto Sorter
 
-A local web app for sorting the pages of a [Quarto](https://quarto.org) project in a tree view by drag and drop.
+A local web app for sorting the pages of a [Quarto](https://quarto.org) project in a tree view by drag and drop, and for rendering each of its book folders to PDF and DOCX.
 
 ## What problem does Quarto Sorter solve?
 
@@ -28,6 +28,7 @@ Then open http://localhost:8199 (change with `-addr`). Enter a project path in t
 - Click a page title to view the file in the right pane.
 - New pages are created as `name/index.qmd` (a section folder). The top-bar **＋ Page** form inserts the new page right after the page currently selected in the tree (or at the end of the root list if none is selected); a node's own ＋ button adds a child page under it. 🗑 moves a page to the system trash (falling back to a `_trash` directory inside the project).
 - The tree refreshes automatically when files change on disk outside the sorter (pages added, deleted, or edited).
+- The top bar's **Render** button opens the render panel; see [Rendering books](#rendering-books).
 
 ## What a drop changes
 
@@ -38,10 +39,50 @@ After every drag and drop, Quarto Sorter updates:
 3. **Heading levels** — when a page's depth changes, all Markdown headings in the affected files shift by the depth difference (clamped to `#`…`######`; code fences are left alone). This compensates for Quarto counting only Markdown heading levels, not folder depth.
 
 The tree — that is, the filesystem plus the `order` frontmatter — is the
-single source of truth. Quarto Sorter no longer maintains `book.chapters`
+single source of truth. Quarto Sorter does not maintain `book.chapters`
 lists in `_quarto.yml` or the profile configs; a book's chapter list is
 expected to be a single `index.qmd`, with the book assembled at render time
 from the folder tree.
+
+## Rendering books
+
+Every first-level folder of the project that holds `.qmd` files is a book.
+(Folders starting with `.` or `_`, media folders without a single `.qmd`
+below them, and folders with a Quarto project config of their own are not.)
+
+The **Render** button in the top bar opens a panel listing those books, each
+with the project's book profiles — the `_quarto-<name>.yml` files that have a
+`book:` key. A book is checked to be rendered; its profiles are checked to
+say which variants to build. A book you have never configured starts with the
+profiles named after it (`tomatoes` and `tomatoes-fw` for the `tomatoes`
+folder) already checked. The selection is remembered per project, in
+`<user config dir>/quarto-sorter/render.json`.
+
+Pressing **Render** then does, per checked book:
+
+1. **Flatten** the folder into one document with
+   [quarto-bookmaker](https://github.com/christophberger-ailab/quarto-bookmaker),
+   whose package is vendored in `internal/bookmaker`. Pages are concatenated in
+   tree order, each page's headings shifted to the level its folder depth
+   implies, in-book links rewritten to anchors, `_FW`/`_POL` folders wrapped in
+   `::: fw` / `::: pol` divs, and unbalanced fences repaired (each repair is
+   reported in the log). The pages' `::: slide` blocks are taken out into a
+   second document.
+2. **Run Quarto**, once per checked profile and format:
+   `quarto render _book-build-<book>.qmd --to <format> --profile <profile>`.
+   A book's profiles select alternative variants of it rather than combining
+   into one document, so each gets its own run; a book with no profile checked
+   is rendered once, without `--profile`. With **slides** checked, the deck is
+   rendered too, to `revealjs`.
+3. **Clean up**: the `_book-build-<book>.qmd` and `_slides-build-<book>.qmd`
+   files are deleted again. They have to exist as files for the duration —
+   `quarto render` does not read a document from standard input, and it
+   resolves media paths against the file's own location, which is why they are
+   written to the project root. The leading underscore keeps Quarto from
+   picking them up as website content of their own.
+
+Output appears live in the panel while Quarto works; one failing book does not
+stop the others.
 
 ## Development
 

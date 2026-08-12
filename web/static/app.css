@@ -72,6 +72,86 @@ body {
   align-items: center;
 }
 
+/* Render panel */
+
+.render > summary {
+  cursor: pointer;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.render > summary:hover {
+  background: var(--hover);
+}
+
+/* The panel hangs below the top bar rather than widening it. */
+.render-body {
+  position: absolute;
+  z-index: 10;
+  margin-top: 0.4rem;
+  max-width: min(38rem, 90vw);
+  max-height: 70vh;
+  overflow: auto;
+  padding: 0.7rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+}
+
+.render-body fieldset {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  margin: 0 0 0.5rem;
+}
+
+.render-body legend {
+  font-size: 0.85rem;
+  padding: 0 0.3rem;
+}
+
+.render-body label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-right: 0.7rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.render-body .profile {
+  color: var(--muted);
+}
+
+.render-output {
+  max-height: 20rem;
+  overflow: auto;
+  margin: 0.6rem 0 0.3rem;
+  padding: 0.5rem;
+  background: var(--hover);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+}
+
+.render-status {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.render-status.failed {
+  color: var(--danger);
+}
+
+.render-status.ok {
+  color: var(--accent);
+}
+
 /* Forms / inputs */
 
 input[type="text"],

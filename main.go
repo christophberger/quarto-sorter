@@ -1,6 +1,7 @@
 // Quarto Sorter is a local web app for reordering the pages of a Quarto
 // project by drag and drop. It keeps the order frontmatter fields and the
-// Markdown heading levels in sync with the tree.
+// Markdown heading levels in sync with the tree, and renders the project's
+// book folders by flattening each into a single document for Quarto.
 package main
 
 import (
@@ -28,7 +29,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	srv, err := newServer()
+	srv, err := newServer(defaultPrefsFile())
 	if err != nil {
 		log.Fatal(err)
 	}
