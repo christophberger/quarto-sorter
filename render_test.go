@@ -87,7 +87,7 @@ func TestRenderFlattensAndRunsQuarto(t *testing.T) {
 	}
 
 	got := calls(t, log)
-	if !strings.Contains(got, "args: render _book-build-chapter2.qmd --to pdf --profile chapter2") {
+	if !strings.Contains(got, "args: render _book-build-chapter2.qmd --to pdf --no-clean --profile chapter2") {
 		t.Errorf("unexpected quarto invocation:\n%s", got)
 	}
 	// The flat document has to be a real file while Quarto reads it.
@@ -135,10 +135,10 @@ func TestRenderRunsOncePerProfileAndFormat(t *testing.T) {
 
 	got := calls(t, log)
 	for _, want := range []string{
-		"--to pdf --profile chapter2\n",
-		"--to docx --profile chapter2\n",
-		"--to pdf --profile chapter2-pol",
-		"--to docx --profile chapter2-pol",
+		"--to pdf --no-clean --profile chapter2\n",
+		"--to docx --no-clean --profile chapter2\n",
+		"--to pdf --no-clean --profile chapter2-pol",
+		"--to docx --no-clean --profile chapter2-pol",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing render run %q:\n%s", want, got)
@@ -146,6 +146,31 @@ func TestRenderRunsOncePerProfileAndFormat(t *testing.T) {
 	}
 	if n := strings.Count(got, "args: render"); n != 4 {
 		t.Errorf("got %d render runs, want 4:\n%s", n, got)
+	}
+}
+
+// Renders go into the same output directory one after another, so Quarto
+// must not clean it between runs, and it must be left to the profiles to say
+// where the output goes and what it is called.
+func TestRenderKeepsProfileOutput(t *testing.T) {
+	log := fakeQuarto(t)
+	srv, _ := testServer(t)
+
+	if rec := post(t, srv, "/render", renderForm()); rec.Code != http.StatusOK {
+		t.Fatalf("render: status %d: %s", rec.Code, rec.Body)
+	}
+	if st := waitForRender(t, srv); st.Failed {
+		t.Fatalf("render failed:\n%s", strings.Join(st.Lines, "\n"))
+	}
+
+	got := calls(t, log)
+	if !strings.Contains(got, "--no-clean") {
+		t.Errorf("quarto called without --no-clean:\n%s", got)
+	}
+	for _, flag := range []string{"--output", "--output-dir"} {
+		if strings.Contains(got, flag) {
+			t.Errorf("%s overrides the profile's output setting:\n%s", flag, got)
+		}
 	}
 }
 
@@ -163,7 +188,7 @@ func TestRenderWithoutProfile(t *testing.T) {
 	}
 
 	got := calls(t, log)
-	if !strings.Contains(got, "args: render _book-build-chapter2.qmd --to pdf\n") {
+	if !strings.Contains(got, "args: render _book-build-chapter2.qmd --to pdf --no-clean\n") {
 		t.Errorf("unexpected quarto invocation:\n%s", got)
 	}
 	if strings.Contains(got, "--profile") {
@@ -337,7 +362,7 @@ func TestRenderSlides(t *testing.T) {
 	}
 
 	got := calls(t, log)
-	if !strings.Contains(got, "args: render _slides-build-chapter2.qmd --to revealjs") {
+	if !strings.Contains(got, "args: render _slides-build-chapter2.qmd --to revealjs --no-clean") {
 		t.Errorf("slides not rendered:\n%s", got)
 	}
 	// The slide content leaves the book.
