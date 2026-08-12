@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // FrontMatter holds the frontmatter fields the sorter cares about.

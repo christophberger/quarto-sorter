@@ -1,6 +1,6 @@
 package project
 
-import "gopkg.in/yaml.v3"
+import "go.yaml.in/yaml/v4"
 
 // hasBook reports whether the yaml document contains a top-level book key.
 func hasBook(src []byte) bool {
