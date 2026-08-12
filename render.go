@@ -206,8 +206,14 @@ func flattenBook(root, book string) (*bookmaker.Result, error) {
 var quartoCommand = "quarto"
 
 // quarto runs one `quarto render` and streams its output into the job log.
+//
+// --no-clean keeps Quarto from emptying the output directory before each
+// run: the books, profiles, and formats are rendered one after another into
+// the same directory, so cleaning would throw away what the previous runs
+// just produced. No --output or --output-dir is passed either, leaving the
+// output paths and file names to the profile configuration.
 func (j *job) quarto(root, input, format, profile string) error {
-	args := []string{"render", filepath.Base(input), "--to", format}
+	args := []string{"render", filepath.Base(input), "--to", format, "--no-clean"}
 	if profile != "" {
 		args = append(args, "--profile", profile)
 	}

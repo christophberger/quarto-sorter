@@ -69,11 +69,16 @@ Pressing **Render** then does, per checked book:
    reported in the log). The pages' `::: slide` blocks are taken out into a
    second document.
 2. **Run Quarto**, once per checked profile and format:
-   `quarto render _book-build-<book>.qmd --to <format> --profile <profile>`.
+   `quarto render _book-build-<book>.qmd --to <format> --no-clean --profile <profile>`.
    A book's profiles select alternative variants of it rather than combining
    into one document, so each gets its own run; a book with no profile checked
    is rendered once, without `--profile`. With **slides** checked, the deck is
    rendered too, to `revealjs`.
+   `--no-clean` is what keeps the runs from wiping each other's results: they
+   write into the same output directory, and Quarto would otherwise empty it
+   before each render. Where that output goes and what it is called is left
+   entirely to the profile configuration — no `--output` or `--output-dir` is
+   passed.
 3. **Clean up**: the `_book-build-<book>.qmd` and `_slides-build-<book>.qmd`
    files are deleted again. They have to exist as files for the duration —
    `quarto render` does not read a document from standard input, and it
